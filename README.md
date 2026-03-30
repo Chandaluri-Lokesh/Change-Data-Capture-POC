@@ -1,4 +1,4 @@
-# poc-debezium (Windows + WSL only)
+# CDC Debezium (Windows + WSL only)
 
 This project is a native (non-Docker) Debezium CDC POC intended to run on:
 
