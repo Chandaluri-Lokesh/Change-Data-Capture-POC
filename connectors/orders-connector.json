@@ -1,0 +1,16 @@
+{
+  "name": "orders-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.mongodb.MongoDbConnector",
+    "mongodb.connection.string": "mongodb://172.20.96.1:27018/?replicaSet=rs0",
+    "topic.prefix": "poc",
+    "database.include.list": "mydb",
+    "collection.include.list": "mydb.orders",
+    "snapshot.mode": "initial",
+    "capture.mode": "change_streams_update_full",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false"
+  }
+}

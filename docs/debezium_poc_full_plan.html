@@ -1,0 +1,246 @@
+
+<style>
+*{box-sizing:border-box}
+.phase{border:0.5px solid var(--color-border-tertiary);border-radius:12px;margin-bottom:10px;overflow:hidden}
+.ph{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;user-select:none;background:var(--color-background-secondary)}
+.ph:hover{background:var(--color-background-tertiary)}
+.pdot{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;flex-shrink:0}
+.ptitle{font-size:14px;font-weight:500;color:var(--color-text-primary);flex:1}
+.pmeta{display:flex;gap:5px;align-items:center}
+.bd{display:inline-block;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:500}
+.chev{font-size:12px;color:var(--color-text-tertiary);transition:transform .2s}
+.chev.open{transform:rotate(90deg)}
+.pbody{display:none;padding:0 14px 12px}
+.pbody.open{display:block}
+.mod{margin-top:10px;border:0.5px solid var(--color-border-tertiary);border-radius:8px;overflow:hidden}
+.mh{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;background:var(--color-background-primary)}
+.mh:hover{background:var(--color-background-secondary)}
+.mtitle{font-size:13px;font-weight:500;color:var(--color-text-primary);flex:1}
+.mb{display:none;border-top:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary)}
+.mb.open{display:block}
+.fpill{display:inline-block;background:var(--color-background-tertiary);border:0.5px solid var(--color-border-tertiary);border-radius:4px;font-size:10px;font-family:var(--font-mono);color:var(--color-text-secondary);padding:1px 5px}
+.sub{display:flex;gap:8px;align-items:flex-start;padding:7px 12px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.sub:last-child{border-bottom:none}
+.sdot{width:6px;height:6px;border-radius:50%;background:var(--color-border-secondary);margin-top:5px;flex-shrink:0}
+.stext{font-size:12px;color:var(--color-text-secondary);line-height:1.55;flex:1}
+.sname{font-weight:500;color:var(--color-text-primary)}
+.ec-section{margin:0;padding:8px 12px 10px;border-top:0.5px solid var(--color-border-warning);background:var(--color-background-warning)}
+.ec-title{font-size:11px;font-weight:500;color:var(--color-text-warning);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+.ec-item{display:flex;gap:7px;align-items:flex-start;margin-bottom:5px}
+.ec-item:last-child{margin-bottom:0}
+.ecdot{width:5px;height:5px;border-radius:50%;background:var(--color-text-warning);margin-top:5px;flex-shrink:0}
+.ectext{font-size:12px;color:var(--color-text-warning);line-height:1.5;flex:1}
+.ecname{font-weight:500}
+.askbtn{margin-top:10px;font-size:12px;padding:5px 12px;cursor:pointer;border-radius:6px}
+.pdesc{font-size:12px;color:var(--color-text-secondary);padding:8px 0 2px;line-height:1.6}
+</style>
+<div id="plan"></div>
+<script>
+const C={teal:{bg:'#E1F5EE',tx:'#085041'},amber:{bg:'#FAEEDA',tx:'#633806'},purple:{bg:'#EEEDFE',tx:'#3C3489'},coral:{bg:'#FAECE7',tx:'#712B13'},gray:{bg:'#F1EFE8',tx:'#2C2C2A'},red:{bg:'#FCEBEB',tx:'#791F1F'}};
+// NOTE: This HTML plan is historical. The repo now targets Windows + WSL native execution (no Docker).
+const phases=[
+{id:1,c:'teal',label:'~1 day',tag:'Foundation',title:'Phase 1 — infrastructure setup',
+desc:'Stand up the entire runtime natively on Windows + WSL (no Docker). MongoDB with replica set (mandatory for Debezium), Kafka (KRaft mode; no ZooKeeper), Kafka Connect, and Postgres instances.',
+prompt:'Document the native Windows + WSL runtime for the Debezium POC (no Docker)',
+modules:[
+{title:'M1 — Native runtime (Windows + WSL)',file:'LOCAL_EXECUTION_GUIDE.md',subs:[
+{n:'MongoDB replica set',d:'mongo:7 single-node RS. Must run rs.initiate() on startup — Debezium reads the oplog and oplog is only available on replica sets, not standalone.'},
+{n:'Kafka (KRaft)',d:'Kafka in KRaft mode (no ZooKeeper). Single broker is fine for POC. Expose port 9092.'},
+{n:'Kafka Connect',d:'confluentinc/cp-kafka-connect with the Debezium MongoDB connector JAR pre-installed. Expose REST API on port 8083.'},
+{n:'Schema Registry',d:'confluentinc/cp-schema-registry on port 8081. Debezium will register Avro schemas for each collection automatically.'},
+{n:'Postgres analytics',d:'postgres:16 on port 5432. Will receive orders_flat, line_items tables.'},
+{n:'Postgres finance',d:'postgres:16 on port 5433. Will receive transactions table.'},
+{n:'Kafka UI (optional)',d:'provectuslabs/kafka-ui — gives you a browser UI to inspect topics, consumer lag, schemas. Invaluable for debugging during POC.'},
+],edges:[
+{n:'Startup ordering',d:'Kafka Connect must wait for Kafka to be ready before starting. Wrong startup order is the #1 cause of silent connector failures on first run.'},
+{n:'Oplog size',d:'Default oplog size may be too small for high-write POC runs. Set oplogSizeMB: 1024 in mongo config or events roll off before Debezium reads them, causing a full resync.'},
+]},
+{title:'M2 — Schema initialisation',file:'init/',subs:[
+{n:'Postgres analytics DDL',d:'CREATE TABLE orders_flat (order_id TEXT PK, customer_id TEXT, status TEXT, city TEXT, total NUMERIC, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ). CREATE TABLE line_items (id SERIAL PK, order_id TEXT, sku TEXT, qty INT, unit_price NUMERIC).'},
+{n:'Postgres finance DDL',d:'CREATE TABLE transactions (txn_id TEXT PK, order_id TEXT UNIQUE, amount NUMERIC, status TEXT, recorded_at TIMESTAMPTZ).'},
+{n:'MongoDB collections',d:'Create orders, customers, products collections. Set validator schemas so malformed documents are rejected at insert time, not discovered mid-pipeline.'},
+],edges:[
+{n:'Idempotent DDL',d:'Wrap all CREATE TABLE in IF NOT EXISTS. Kafka Connect restart will re-run init scripts. Without this, restarts crash the init container.'},
+]},
+]},
+{id:2,c:'amber',label:'~0.5 day',tag:'Data in',title:'Phase 2 — data generator',
+desc:'Simulate continuous e-commerce events into MongoDB. Same as before but now you specifically need to exercise all Debezium event types: insert, update, replace, and delete.',
+prompt:'Write the Python data generator for the Debezium POC — must exercise insert, update, replace, and delete event types',
+modules:[
+{title:'M3 — Event simulator',file:'src/generator/simulator.py',subs:[
+{n:'INSERT loop',d:'Generates a new order every N seconds using Faker. Inserts into MongoDB orders collection.'},
+{n:'UPDATE loop',d:'Uses update_one with $set to advance order status. Produces Debezium update events with updateDescription.removedFields and updatedFields.'},
+{n:'REPLACE loop',d:'Uses replace_one to overwrite the entire document. Debezium treats this differently from update — produces a full document event with no diff. Your consumer must handle both.'},
+{n:'DELETE loop',d:'Occasionally deletes an old order. Debezium emits a delete event with only the _id — no document body. Your consumer must handle null fullDocument gracefully.'},
+{n:'Bulk insert',d:'One-off script to seed 1000 orders before the connector starts. Tests initial snapshot behaviour.'},
+],edges:[
+{n:'Clock skew',d:'Generator timestamps use datetime.utcnow(). If your host clock drifts, event ordering by timestamp becomes unreliable. Always use MongoDB server time via $$NOW in aggregations, not the generator clock.'},
+{n:'ObjectId generation',d:'Python generates ObjectIds client-side. If the generator crashes mid-batch, some ObjectIds exist in the generator but not MongoDB. Build in duplicate-safe upsert logic.'},
+]},
+]},
+{id:3,c:'purple',label:'~1.5 days',tag:'CDC capture',title:'Phase 3 — Debezium connector',
+desc:'Register and manage the Debezium MongoDB source connector via the Kafka Connect REST API. This is where most of the Debezium-specific configuration and edge cases live.',
+prompt:'Write the Debezium MongoDB connector config and registration script for the POC, including snapshot mode and error handling config',
+modules:[
+{title:'M4 — Connector registration',file:'connectors/orders-connector.json',subs:[
+{n:'Connector config JSON',d:'connector.class: io.debezium.connector.mongodb.MongoDbConnector. mongodb.connection.string pointing to replica set. database.include.list and collection.include.list to scope capture.'},
+{n:'snapshot.mode',d:'Set to initial for first run — captures all existing documents before streaming live changes. Set to never after POC is stable to skip the snapshot on restart.'},
+{n:'topic.prefix',d:'Sets the Kafka topic prefix. E.g. prefix=poc produces topics poc.mydb.orders, poc.mydb.products.'},
+{n:'Registration script',d:'register_connector.py — POSTs the config JSON to http://kafka-connect:8083/connectors. Checks for 201 Created. Polls /connectors/{name}/status until state=RUNNING.'},
+],edges:[
+{n:'Snapshot + live race',d:'During initial snapshot, live writes are also happening. Debezium handles this by snapshotting at a specific oplog position, then replaying changes from that position. But if your oplog window is too small and the snapshot is slow, the oplog position may roll off — triggering a full re-snapshot. Watch for ResyncRequiredException in connector logs.'},
+{n:'Connector already exists',d:'Re-registering an existing connector name returns 409. registration script must DELETE the old connector before re-creating, or use PUT /connectors/{name}/config to update in place.'},
+{n:'Auth failure',d:'If MongoDB requires auth, the connector will silently fail if credentials are wrong — it reports RUNNING but produces no events. Always verify with /connectors/{name}/status and check tasks[0].state.'},
+]},
+{title:'M5 — Connector lifecycle manager',file:'src/connector/manager.py',subs:[
+{n:'health_check()',d:'Polls GET /connectors/{name}/status every 30s. Alerts if task state is FAILED. Automatically restarts failed tasks via POST /connectors/{name}/tasks/0/restart.'},
+{n:'pause() / resume()',d:'Wraps PUT /connectors/{name}/pause and /resume. Useful for controlled maintenance windows without losing offset.'},
+{n:'offset reset',d:'Script to manually set the connector offset in Kafka (kafka-consumer-groups.sh --reset-offsets). Needed when you want to replay from a specific point.'},
+],edges:[
+{n:'Task vs connector failure',d:'A connector can report RUNNING while its tasks are FAILED. Always check tasks[].state, not just connector state.'},
+{n:'Zombie connector',d:'Kafka Connect worker crash can leave a connector in an in-between state. Implement a watchdog that checks both the Connect REST API and whether the Kafka topic is receiving new messages. If topic is silent for >60s but connector claims RUNNING, force restart.'},
+]},
+]},
+{id:4,c:'coral',label:'~2 days',tag:'Core pipeline',title:'Phase 4 — consumer, transformer & writer',
+desc:'Consume Debezium events from Kafka, transform the Debezium envelope format into flat Postgres rows, and write to target databases. This is the largest phase — Debezium wraps events in a specific envelope schema that you must unwrap correctly.',
+prompt:'Write the Kafka consumer and Debezium event transformer for the POC, handling insert, update, replace, delete, and tombstone events',
+modules:[
+{title:'M6 — Kafka consumer',file:'src/consumer/kafka_consumer.py',subs:[
+{n:'Consumer group setup',d:'consumer_group_id per logical consumer (e.g. analytics-consumer, finance-consumer). Each group tracks its own offset independently — analytics can lag without affecting finance.'},
+{n:'Commit strategy',d:'Use manual offset commit (enable.auto.commit=false). Commit only after successful Postgres write. If the write fails, the offset is not committed and the event will be re-delivered on restart.'},
+{n:'Batch polling',d:'poll(timeout_ms=1000, max_records=100). Batch up to 100 events, transform all, write in one Postgres transaction. Reduces round-trips significantly.'},
+{n:'Avro deserialisation',d:'Use confluent_kafka.avro.AvroConsumer with schema.registry.url. Debezium registers schemas automatically — consumer reads them at runtime.'},
+],edges:[
+{n:'Rebalance during processing',d:'If a consumer crashes mid-batch, Kafka rebalances partitions to another consumer. The uncommitted offset means those events are re-delivered. Your Postgres writer MUST be idempotent (INSERT ON CONFLICT DO NOTHING/UPDATE) or you get duplicate rows.'},
+{n:'Lag spike on restart',d:'After a crash, the consumer restarts from the last committed offset. If downtime was long, there may be thousands of backlogged events. Implement a lag metric and alert if consumer lag > 5000 events so you can scale or investigate before Postgres gets overwhelmed.'},
+{n:'Poison pill event',d:'A single malformed event can block a partition forever if your consumer crashes processing it. Wrap each event processing in try/except — on failure, send to DLQ topic and commit the offset so processing continues.'},
+]},
+{title:'M7 — Debezium envelope parser',file:'src/transformer/debezium_parser.py',subs:[
+{n:'Envelope unwrapper',d:'Debezium wraps every event: {op, before, after, source, ts_ms}. op can be c (create), u (update), d (delete), r (read/snapshot). Your parser must handle all four.'},
+{n:'op=c (insert)',d:'after contains the new document as a JSON string. Parse it, extract fields, map to Postgres row.'},
+{n:'op=u (update)',d:'after contains the full document post-update (with fullDocument lookup enabled). before is null for MongoDB. Use after only.'},
+{n:'op=d (delete)',d:'after is null. before is null for MongoDB CDC (unlike relational DBs). You only get the _id from the key. Issue a DELETE or soft-delete in Postgres using the extracted _id.'},
+{n:'op=r (snapshot)',d:'Same shape as insert. Treat identically to op=c. These fire during initial snapshot — your upsert logic handles duplicates automatically.'},
+{n:'Tombstone event',d:'After every delete, Debezium emits a second event with null value — this is the tombstone, used for Kafka log compaction. Your consumer must detect null value and skip it silently.'},
+],edges:[
+{n:'Schema evolution',d:'If someone adds a new field to MongoDB documents, Debezium emits a new Avro schema version. AvroConsumer handles this transparently, but your field mapper must handle missing keys with defaults — never raise KeyError on unknown fields.'},
+{n:'Nested ObjectId',d:'MongoDB ObjectId serialises in Debezium as {"$oid": "abc123"}. Your parser must extract the string value, not pass the raw dict to Postgres.'},
+{n:'ISODate serialisation',d:'MongoDB dates come through as epoch milliseconds (int64) in Debezium Avro. Convert with datetime.utcfromtimestamp(ts_ms / 1000) — not as a string.'},
+{n:'Large array fields',d:'If an order has 500 line items, the Debezium event can exceed 1MB. Kafka default max.message.bytes is 1MB. Either increase this config or enforce a max items limit in the generator.'},
+]},
+{title:'M8 — Postgres writer',file:'src/writer/pg_writer.py',subs:[
+{n:'Upsert handler',d:'INSERT INTO orders_flat (...) VALUES (...) ON CONFLICT (order_id) DO UPDATE SET status=EXCLUDED.status, updated_at=EXCLUDED.updated_at. Handles both snapshot re-delivery and live duplicate events.'},
+{n:'Delete handler',d:'On op=d, issue DELETE FROM orders_flat WHERE order_id=$1. Also cascade-delete line_items. Wrap in a transaction.'},
+{n:'Batch transaction',d:'Accumulate rows from a poll batch, write all in a single BEGIN/COMMIT. If any row fails, roll back the entire batch, send all events to DLQ, commit Kafka offset.'},
+{n:'Connection pool',d:'asyncpg pool per Postgres target. min_size=2, max_size=10. Separate pools for analytics and finance so one slow target does not block the other.'},
+],edges:[
+{n:'Partial batch failure',d:'If row 47 of a 100-row batch fails (e.g. constraint violation), rolling back all 100 and sending to DLQ is safe but wastes 99 good rows. Alternative: write row-by-row within the batch and only DLQ the failing row. Choose based on throughput vs granularity trade-off.'},
+{n:'Postgres connection drop',d:'asyncpg raises ConnectionDoNotUseError on stale connections. Wrap writes in a retry loop — on connection error, return connection to pool, acquire fresh one, retry once before DLQing.'},
+{n:'Clock sync between services',d:'If Postgres server time and event ts_ms differ by >1s, created_at values in Postgres will look wrong. Always store the ts_ms from the Debezium event as created_at, not datetime.now().'},
+]},
+{title:'M9 — Dead letter queue',file:'src/consumer/dlq.py',subs:[
+{n:'DLQ Kafka topic',d:'Produce failed events to poc.dlq topic with original event payload, error message, stack trace, and retry_count header.'},
+{n:'DLQ consumer',d:'Separate process that reads poc.dlq. Logs all failures. Optionally retries events with retry_count < 3 back to the original topic.'},
+{n:'DLQ replayer CLI',d:'python -m dlq_replay --topic poc.dlq --from-beginning. Replays all DLQ events through the transformer. For manual recovery after a bug fix.'},
+],edges:[
+{n:'DLQ infinite loop',d:'If a bug causes every event to fail, the DLQ replayer replaying back into the main topic creates an infinite loop. Always check retry_count header and drop events with count >= 3 to a final dlq.dead file on disk.'},
+]},
+]},
+{id:5,c:'gray',label:'~1 day',tag:'Resilience',title:'Phase 5 — offset management & recovery',
+desc:'Handle the scenarios that make pipelines fragile in production: consumer restarts, connector failures, oplog gaps, and schema drift. These are not afterthoughts — build them in phase 5 before you call the POC complete.',
+prompt:'How do I implement offset management and recovery scenarios for the Debezium POC?',
+modules:[
+{title:'M10 — Offset & resume management',file:'src/ops/offset_manager.py',subs:[
+{n:'Offset tracker',d:'Log current consumer offset per topic+partition after every successful batch commit. Store in a local SQLite file. Gives you a human-readable audit trail of where each consumer is.'},
+{n:'Lag monitor',d:'Compare consumer committed offset to Kafka end offset. Alert if lag > threshold. Log lag_ms = current_time - event_ts_ms to measure end-to-end pipeline latency.'},
+{n:'Controlled reset script',d:'python ops/reset_offset.py --group analytics-consumer --topic poc.mydb.orders --to-earliest|--to-latest|--to-offset N. Uses kafka-consumer-groups.sh under the hood.'},
+],edges:[
+{n:'Oplog gap / StaleResumeTokenException',d:'If Kafka Connect is down for >oplog retention window (default ~24h on small deployments), Debezium cannot resume and throws StaleResumeTokenException. It triggers a full re-snapshot. Your consumer must handle the snapshot flood — all existing documents re-delivered as op=r. Because you use upsert, this is safe but slow.'},
+{n:'Kafka topic retention',d:'If Kafka topic retention is set lower than your consumer downtime, the consumer offset becomes invalid (offset out of range). Set retention.ms=604800000 (7 days) on all CDC topics for the POC.'},
+]},
+{title:'M11 — Schema drift handler',file:'src/transformer/schema_guard.py',subs:[
+{n:'Schema version check',d:'On startup, fetch current schema from Schema Registry. Compare to the schema your transformer was last compiled against. Log a warning if they differ — new field added.'},
+{n:'Unknown field passthrough',d:'If Debezium event contains a field not in your field map, log it but do not crash. Store it in a metadata JSONB column in Postgres for later analysis.'},
+{n:'Breaking change detector',d:'If a required field (e.g. customer_id) is absent in an incoming event, route to DLQ immediately with reason=missing_required_field. Do not write a partial row.'},
+],edges:[
+{n:'Collection rename / drop',d:'If someone renames or drops a MongoDB collection, Debezium stops producing events for that topic silently. Connector stays RUNNING. Add a staleness check: alert if no events received on a topic for >5 minutes during business hours.'},
+]},
+]},
+{id:6,c:'red',label:'~0.5 day',tag:'Validate',title:'Phase 6 — verification & observability',
+desc:'Prove correctness and make the pipeline observable. Focus on the scenarios unique to Debezium: snapshot parity, delete propagation, and end-to-end latency.',
+prompt:'What verification tests and observability should I add for the Debezium POC?',
+modules:[
+{title:'M12 — Verification suite',file:'scripts/verify.py',subs:[
+{n:'Count parity check',d:'SELECT COUNT(*) from MongoDB orders == SELECT COUNT(*) from Postgres orders_flat. Run after snapshot completes. Should match within 1-2 events (in-flight).'},
+{n:'Delete propagation test',d:'Delete a known order_id in Mongo. Assert it disappears from Postgres within 5 seconds. Tombstone handling test.'},
+{n:'Update propagation test',d:'Update an order status. Assert Postgres row reflects the new status. Checks op=u path.'},
+{n:'Latency probe',d:'Insert doc, record insert timestamp. Poll Postgres every 100ms until row appears. Print pipeline_latency_ms. Target < 2000ms for POC.'},
+{n:'Duplicate safety test',d:'Force-restart the consumer mid-batch. Verify no duplicate rows appear in Postgres. Tests idempotency of upsert.'},
+],edges:[
+{n:'Snapshot vs live count drift',d:'Count check may show Mongo=1000, Postgres=998 during an active test run — not a bug, just in-flight events. Re-run the check after pausing the generator. If still mismatched after 30s, there is a real data loss issue to investigate.'},
+]},
+{title:'M13 — Observability',file:'src/metrics.py',subs:[
+{n:'Pipeline metrics log',d:'Every 10s print: events_consumed, events_written, events_dlq, consumer_lag_max, avg_latency_ms.'},
+{n:'Connector status dashboard',d:'Simple FastAPI /status endpoint returning connector state, task state, last event timestamp, and consumer lag per topic.'},
+{n:'Structured JSON logs',d:'Every event log line includes: op_type, collection, order_id, latency_ms, target_db, status (written|dlq|skipped).'},
+],edges:[]},
+]},
+];
+
+function render(){
+  const el=document.getElementById('plan');
+  el.innerHTML=phases.map(p=>`
+    <div class="phase">
+      <div class="ph" onclick="tp(${p.id})">
+        <div class="pdot" style="background:${C[p.c].bg};color:${C[p.c].tx}">${p.id}</div>
+        <div class="ptitle">${p.title}</div>
+        <div class="pmeta">
+          <span class="bd" style="background:${C[p.c].bg};color:${C[p.c].tx}">${p.tag}</span>
+          <span class="bd" style="background:var(--color-background-tertiary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary)">${p.label}</span>
+          <span class="chev" id="chev-${p.id}">›</span>
+        </div>
+      </div>
+      <div class="pbody" id="body-${p.id}">
+        <div class="pdesc">${p.desc}</div>
+        ${p.modules.map((m,mi)=>`
+          <div class="mod">
+            <div class="mh" onclick="tm('${p.id}-${mi}')">
+              <div style="width:18px;height:18px;border-radius:3px;background:${C[p.c].bg};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                <span style="font-size:10px;font-weight:500;color:${C[p.c].tx}">${mi+1}</span>
+              </div>
+              <div class="mtitle">${m.title}</div>
+              <span class="fpill">${m.file}</span>
+              <span class="chev" id="mc-${p.id}-${mi}" style="margin-left:5px">›</span>
+            </div>
+            <div class="mb" id="mb-${p.id}-${mi}">
+              ${m.subs.map(s=>`
+                <div class="sub">
+                  <div class="sdot"></div>
+                  <div class="stext"><span class="sname">${s.n}</span> — ${s.d}</div>
+                </div>`).join('')}
+              ${m.edges&&m.edges.length?`
+                <div class="ec-section">
+                  <div class="ec-title">Edge cases</div>
+                  ${m.edges.map(e=>`
+                    <div class="ec-item">
+                      <div class="ecdot"></div>
+                      <div class="ectext"><span class="ecname">${e.n}</span> — ${e.d}</div>
+                    </div>`).join('')}
+                </div>`:''}
+            </div>
+          </div>`).join('')}
+        <button class="askbtn" onclick="sendPrompt('${p.prompt}')">Generate code for this phase ↗</button>
+      </div>
+    </div>`).join('');
+}
+
+function tp(id){
+  const b=document.getElementById('body-'+id),c=document.getElementById('chev-'+id);
+  const o=b.classList.toggle('open');c.classList.toggle('open',o);
+}
+function tm(id){
+  const b=document.getElementById('mb-'+id),c=document.getElementById('mc-'+id);
+  const o=b.classList.toggle('open');c.classList.toggle('open',o);
+}
+render();
+</script>
