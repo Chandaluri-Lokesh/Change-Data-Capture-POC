@@ -1,0 +1,28 @@
+{
+  "_id": "ASN-2026-01223",
+  "document_type": "ASN",
+  "asn_number": "ASN-2026-01223",
+  "po_number": "PO-2026-05512",
+  "vendor_id": "V-1042",
+  "ship_date": "2026-09-01",
+  "carrier": "BlueDart Logistics",
+  "tracking_number": "BD7788219940",
+  "expected_arrival": "2026-09-10",
+  "status": "IN_TRANSIT",
+  "line_items": [
+    {
+      "line_no": 1,
+      "material_code": "MAT-7734",
+      "quantity_shipped": 500,
+      "unit_of_measure": "EA"
+    },
+    {
+      "line_no": 2,
+      "material_code": "MAT-8821",
+      "quantity_shipped": 200,
+      "unit_of_measure": "EA"
+    }
+  ],
+  "created_at": "2026-09-01T07:40:00Z",
+  "updated_at": "2026-09-01T07:40:00Z"
+}

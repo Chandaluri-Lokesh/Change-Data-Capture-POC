@@ -1,0 +1,42 @@
+{
+  "_id": "RFQ-2026-00841",
+  "document_type": "RFQ",
+  "rfq_number": "RFQ-2026-00841",
+  "requested_date": "2026-08-10",
+  "requested_by": "procurement.chennai@buyerco.com",
+  "plant": "Plant-Chennai-01",
+  "status": "OPEN",
+  "response_due_date": "2026-08-20",
+  "invited_vendors": [
+    {
+      "vendor_id": "V-1042",
+      "vendor_name": "Ashford Industrial Supplies",
+      "invited_on": "2026-08-10"
+    },
+    {
+      "vendor_id": "V-1087",
+      "vendor_name": "Meridian Components Ltd.",
+      "invited_on": "2026-08-10"
+    }
+  ],
+  "line_items": [
+    {
+      "line_no": 1,
+      "material_code": "MAT-7734",
+      "description": "Stainless Steel Pipe Fittings, DN50",
+      "quantity": 500,
+      "unit_of_measure": "EA",
+      "target_delivery_date": "2026-09-15"
+    },
+    {
+      "line_no": 2,
+      "material_code": "MAT-8821",
+      "description": "Industrial Gasket Set",
+      "quantity": 200,
+      "unit_of_measure": "EA",
+      "target_delivery_date": "2026-09-15"
+    }
+  ],
+  "created_at": "2026-08-10T09:12:00Z",
+  "updated_at": "2026-08-10T09:12:00Z"
+}

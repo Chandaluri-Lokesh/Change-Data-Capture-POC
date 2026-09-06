@@ -1,0 +1,109 @@
+# =====================================================================
+# Mapping rules: PO (Purchase Order)
+# Source: MongoDB collection "purchase_orders"
+# Targets: PostgreSQL (relational) and Neo4j (property graph)
+# =====================================================================
+
+document_type: PO
+source_collection: purchase_orders
+source_key_field: po_number
+
+# ---------------------------------------------------------------------
+# PostgreSQL mapping
+# ---------------------------------------------------------------------
+postgresql:
+  parent_table:
+    name: purchase_orders
+    primary_key: po_number
+    columns:
+      - { source_field: po_number,       column: po_number,       type: VARCHAR(20) }
+      - { source_field: rfq_number,      column: rfq_number,      type: VARCHAR(20), foreign_key: rfq.rfq_number, nullable: true }
+      - { source_field: vendor_id,       column: vendor_id,       type: VARCHAR(20) }
+      - { source_field: vendor_name,     column: vendor_name,     type: VARCHAR(100) }
+      - { source_field: order_date,      column: order_date,      type: DATE }
+      - { source_field: delivery_date,   column: delivery_date,   type: DATE }
+      - { source_field: plant,           column: plant,           type: VARCHAR(30) }
+      - { source_field: currency,        column: currency,        type: CHAR(3) }
+      - { source_field: status,          column: status,          type: VARCHAR(20) }
+      - { source_field: payment_terms,   column: payment_terms,   type: VARCHAR(20) }
+      - { source_field: order_total,     column: order_total,     type: NUMERIC(14,2) }
+      - { source_field: updated_at,      column: source_updated_at, type: TIMESTAMPTZ }
+
+  child_tables:
+    - name: po_line_items
+      source_array_field: line_items
+      foreign_key: { column: po_number, references: purchase_orders.po_number, on_delete: CASCADE }
+      upsert_key: [po_number, line_no]
+      columns:
+        - { source_field: line_no,          column: line_no,       type: INTEGER }
+        - { source_field: material_code,    column: material_code, type: VARCHAR(20) }
+        - { source_field: description,      column: description,   type: VARCHAR(200) }
+        - { source_field: quantity,         column: quantity,      type: NUMERIC(12,2) }
+        - { source_field: unit_of_measure,   column: uom,            type: VARCHAR(10) }
+        - { source_field: unit_price,       column: unit_price,    type: NUMERIC(12,2) }
+        - { source_field: line_total,       column: line_total,    type: NUMERIC(14,2) }
+
+  write_mode: UPSERT
+  delete_mode: HARD_DELETE_CASCADE
+
+# ---------------------------------------------------------------------
+# Neo4j mapping
+# ---------------------------------------------------------------------
+neo4j:
+  node:
+    label: PurchaseOrder
+    key_property: po_number
+    properties:
+      - { source_field: po_number,      property: po_number }
+      - { source_field: order_date,     property: order_date }
+      - { source_field: delivery_date,  property: delivery_date }
+      - { source_field: plant,          property: plant }
+      - { source_field: currency,       property: currency }
+      - { source_field: status,         property: status }
+      - { source_field: order_total,    property: order_total }
+    merge_cypher: |
+      MERGE (p:PurchaseOrder {po_number: $po_number})
+      SET p.order_date    = $order_date,
+          p.delivery_date = $delivery_date,
+          p.plant         = $plant,
+          p.currency      = $currency,
+          p.status        = $status,
+          p.order_total   = $order_total
+
+  relationships:
+    - type: ISSUED_AGAINST
+      direction: (PurchaseOrder)-[:ISSUED_AGAINST]->(RFQ)
+      source_field: rfq_number
+      condition: "rfq_number IS NOT NULL"
+      target_node: { label: RFQ, key_property: rfq_number, source_key_field: rfq_number }
+      merge_cypher: |
+        MATCH (p:PurchaseOrder {po_number: $po_number})
+        MATCH (r:RFQ {rfq_number: $rfq_number})
+        MERGE (p)-[:ISSUED_AGAINST]->(r)
+
+    - type: ISSUED_TO
+      direction: (PurchaseOrder)-[:ISSUED_TO]->(Vendor)
+      source_field: vendor_id
+      target_node: { label: Vendor, key_property: vendor_id, source_key_field: vendor_id }
+      merge_cypher: |
+        MATCH (p:PurchaseOrder {po_number: $po_number})
+        MERGE (v:Vendor {vendor_id: $vendor_id})
+        SET v.vendor_name = $vendor_name
+        MERGE (p)-[:ISSUED_TO]->(v)
+
+    - type: ORDERS
+      direction: (PurchaseOrder)-[:ORDERS]->(Material)
+      source_array_field: line_items
+      target_node: { label: Material, key_property: material_code, source_key_field: material_code }
+      relationship_properties:
+        - { source_field: quantity,    property: quantity }
+        - { source_field: unit_price,  property: unit_price }
+        - { source_field: line_total,  property: line_total }
+      merge_cypher: |
+        MATCH (p:PurchaseOrder {po_number: $po_number})
+        MERGE (m:Material {material_code: $material_code})
+        SET m.description = $description
+        MERGE (p)-[o:ORDERS]->(m)
+        SET o.quantity = $quantity, o.unit_price = $unit_price, o.line_total = $line_total
+
+  delete_mode: DETACH_DELETE

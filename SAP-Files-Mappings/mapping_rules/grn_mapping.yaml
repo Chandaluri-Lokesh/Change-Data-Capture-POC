@@ -1,0 +1,96 @@
+# =====================================================================
+# Mapping rules: GRN (Goods Receipt Note)
+# Source: MongoDB collection "grns"
+# Targets: PostgreSQL (relational) and Neo4j (property graph)
+# =====================================================================
+
+document_type: GRN
+source_collection: grns
+source_key_field: grn_number
+
+# ---------------------------------------------------------------------
+# PostgreSQL mapping
+# ---------------------------------------------------------------------
+postgresql:
+  parent_table:
+    name: grns
+    primary_key: grn_number
+    columns:
+      - { source_field: grn_number,    column: grn_number,        type: VARCHAR(20) }
+      - { source_field: po_number,     column: po_number,         type: VARCHAR(20), foreign_key: purchase_orders.po_number }
+      - { source_field: asn_number,    column: asn_number,        type: VARCHAR(20), foreign_key: asns.asn_number }
+      - { source_field: receipt_date,  column: receipt_date,      type: DATE }
+      - { source_field: received_by,   column: received_by,       type: VARCHAR(100) }
+      - { source_field: plant,         column: plant,              type: VARCHAR(30) }
+      - { source_field: status,        column: status,             type: VARCHAR(20) }
+      - { source_field: updated_at,    column: source_updated_at, type: TIMESTAMPTZ }
+
+  child_tables:
+    - name: grn_line_items
+      source_array_field: line_items
+      foreign_key: { column: grn_number, references: grns.grn_number, on_delete: CASCADE }
+      upsert_key: [grn_number, line_no]
+      columns:
+        - { source_field: line_no,            column: line_no,           type: INTEGER }
+        - { source_field: material_code,      column: material_code,     type: VARCHAR(20) }
+        - { source_field: quantity_received,  column: quantity_received, type: NUMERIC(12,2) }
+        - { source_field: unit_of_measure,     column: uom,                type: VARCHAR(10) }
+        - { source_field: condition,          column: condition,         type: VARCHAR(30) }
+        - { source_field: remarks,            column: remarks,           type: VARCHAR(200), nullable: true }
+
+  write_mode: UPSERT
+  delete_mode: HARD_DELETE_CASCADE
+
+# ---------------------------------------------------------------------
+# Neo4j mapping
+# ---------------------------------------------------------------------
+neo4j:
+  node:
+    label: GRN
+    key_property: grn_number
+    properties:
+      - { source_field: grn_number,    property: grn_number }
+      - { source_field: receipt_date,  property: receipt_date }
+      - { source_field: received_by,   property: received_by }
+      - { source_field: plant,         property: plant }
+      - { source_field: status,        property: status }
+    merge_cypher: |
+      MERGE (g:GRN {grn_number: $grn_number})
+      SET g.receipt_date  = $receipt_date,
+          g.received_by   = $received_by,
+          g.plant         = $plant,
+          g.status        = $status
+
+  relationships:
+    - type: RECEIVES
+      direction: (GRN)-[:RECEIVES]->(ASN)
+      source_field: asn_number
+      target_node: { label: ASN, key_property: asn_number, source_key_field: asn_number }
+      merge_cypher: |
+        MATCH (g:GRN {grn_number: $grn_number})
+        MATCH (a:ASN {asn_number: $asn_number})
+        MERGE (g)-[:RECEIVES]->(a)
+
+    - type: CONFIRMS
+      direction: (GRN)-[:CONFIRMS]->(PurchaseOrder)
+      source_field: po_number
+      target_node: { label: PurchaseOrder, key_property: po_number, source_key_field: po_number }
+      merge_cypher: |
+        MATCH (g:GRN {grn_number: $grn_number})
+        MATCH (p:PurchaseOrder {po_number: $po_number})
+        MERGE (g)-[:CONFIRMS]->(p)
+
+    - type: RECEIVED
+      direction: (GRN)-[:RECEIVED]->(Material)
+      source_array_field: line_items
+      target_node: { label: Material, key_property: material_code, source_key_field: material_code }
+      relationship_properties:
+        - { source_field: quantity_received, property: quantity_received }
+        - { source_field: condition,          property: condition }
+      merge_cypher: |
+        MATCH (g:GRN {grn_number: $grn_number})
+        MERGE (m:Material {material_code: $material_code})
+        MERGE (g)-[r:RECEIVED]->(m)
+        SET r.quantity_received = $quantity_received, r.condition = $condition
+
+  delete_mode: DETACH_DELETE

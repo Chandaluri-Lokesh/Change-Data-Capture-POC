@@ -48,7 +48,7 @@ def create_dlq_producer(broker_url: str) -> Producer:
         'acks':                  'all',
         'retries':               3,
         'retry.backoff.ms':      200,
-        'broker.address.family': 'v6',
+        'broker.address.family': 'v4',
     })
 
 

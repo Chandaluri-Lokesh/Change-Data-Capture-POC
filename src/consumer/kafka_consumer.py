@@ -1,5 +1,5 @@
 """
-Main Kafka consumer — orchestrates the full CDC pipeline.
+Main Kafka consumer — orchestrates the full CDC pipeline for P2P documents.
 
 Pipeline per message
 ────────────────────
@@ -7,33 +7,18 @@ Pipeline per message
 2. For each message:
    a. Parse Debezium envelope → ParsedEvent          (debezium_parser)
    b. Validate required fields / detect schema drift  (schema_guard)
-   c. Route to (db_target, table, row) targets        (router)
-   d. Write to Postgres (row-by-row error handling)   (pg_writer)
-3. Manual offset commit after the full batch is processed
-   (success rows written + failed rows DLQ'd)
+   c. Route → (table, rows, upsert_key) targets       (router → mapping_engine)
+   d. Write to Postgres generically                   (pg_writer.upsert_table / delete_cascade)
+   e. Write to Neo4j (node merge + relationships)     (neo4j_writer.run_ops)
+3. Manual offset commit after the full batch
 
-Offset commit strategy
-──────────────────────
-enable.auto.commit=False.  Commit only after the entire batch is either
-written to Postgres or sent to the DLQ.  This means on restart we replay
-at most one batch — all writes are idempotent (ON CONFLICT DO UPDATE) so
-replaying is safe.
-
-Row-by-row error handling
-─────────────────────────
-A bad row goes to DLQ without blocking the rest of the batch.
-This is better granularity than rolling back all 100 rows for one failure.
-
-Edge cases
-──────────
-- Tombstone (null value): silently skipped.
-- Poison pill / parse error: DLQ + commit (partition is not blocked).
-- Consumer rebalance mid-batch: uncommitted offsets cause re-delivery;
-  idempotent upserts absorb duplicates safely.
-- Lag spike on restart: batch drain handles backlog; lag metric is visible
-  via src/metrics.py.
-- KafkaError._PARTITION_EOF: informational, not an error — logged at DEBUG.
-- Graceful shutdown on KeyboardInterrupt: closes consumer, pools, DLQ producer.
+Topics consumed
+───────────────
+  poc.mydb.rfqs
+  poc.mydb.purchase_orders
+  poc.mydb.asns
+  poc.mydb.grns
+  poc.mydb.invoices
 
 Run
 ───
@@ -46,7 +31,6 @@ import os
 import sys
 import time
 
-# Ensure src/ is importable when running this script directly
 _src = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if _src not in sys.path:
     sys.path.insert(0, _src)
@@ -60,11 +44,11 @@ import transformer.schema_guard as schema_guard
 from writer.pg_writer import (
     create_pool,
     ensure_metrics_table,
-    upsert_orders_flat,
-    upsert_transactions,
-    delete_order,
+    upsert_table,
+    delete_cascade,
     write_metric,
 )
+from writer.neo4j_writer import create_driver, run_ops, apply_constraints
 from consumer.dlq import create_dlq_producer, send_to_dlq
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
@@ -76,32 +60,39 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 BROKER       = os.getenv('KAFKA_BROKER_URL', 'localhost:9092')
-TOPICS       = ['poc.mydb.orders']
-GROUP_ID     = 'poc-pipeline-consumer'
+TOPICS       = [
+    'poc.mydb.rfqs',
+    'poc.mydb.purchase_orders',
+    'poc.mydb.asns',
+    'poc.mydb.grns',
+    'poc.mydb.invoices',
+]
+GROUP_ID     = 'p2p-pipeline-consumer'
 BATCH_SIZE   = 100
-POLL_TIMEOUT = 1.0   # seconds; consumer.consume() blocks up to this long
+POLL_TIMEOUT = 1.0
 
 
 # ---------------------------------------------------------------------------
-# Pool creation
+# Connection setup
 # ---------------------------------------------------------------------------
 
-async def _create_pools():
-    analytics_pool = await create_pool(
+async def _create_pg_pool():
+    return await create_pool(
         host=os.getenv('POSTGRES_ANALYTICS_HOST', 'localhost'),
-        port=os.getenv('POSTGRES_ANALYTICS_PORT', '5434'),
+        port=os.getenv('POSTGRES_ANALYTICS_PORT', '5432'),
         user=os.getenv('POSTGRES_ANALYTICS_USER', 'postgres'),
-        password=os.getenv('POSTGRES_ANALYTICS_PASSWORD', 'password'),
+        password=os.getenv('POSTGRES_ANALYTICS_PASSWORD', 'postgres'),
         db=os.getenv('POSTGRES_ANALYTICS_DB', 'analytics'),
     )
-    finance_pool = await create_pool(
-        host=os.getenv('POSTGRES_FINANCE_HOST', 'localhost'),
-        port=os.getenv('POSTGRES_FINANCE_PORT', '5433'),
-        user=os.getenv('POSTGRES_FINANCE_USER', 'postgres'),
-        password=os.getenv('POSTGRES_FINANCE_PASSWORD', 'password'),
-        db=os.getenv('POSTGRES_FINANCE_DB', 'finance'),
+
+
+async def _create_neo4j_driver():
+    return await create_driver(
+        uri=os.getenv('NEO4J_URI',      'bolt://localhost:7687'),
+        user=os.getenv('NEO4J_USER',    'neo4j'),
+        password=os.getenv('NEO4J_PASSWORD', 'neo4j'),
+        database=os.getenv('NEO4J_DATABASE', None),
     )
-    return analytics_pool, finance_pool
 
 
 # ---------------------------------------------------------------------------
@@ -109,15 +100,9 @@ async def _create_pools():
 # ---------------------------------------------------------------------------
 
 async def _process_message(
-    msg, analytics_pool, finance_pool, dlq_producer,
+    msg, pg_pool, neo4j_driver, dlq_producer,
     kafka_ts_ms: int, doc_size_bytes: int, consumer_recv_ms: int,
 ) -> bool:
-    """
-    Process one Kafka message through the full pipeline.
-
-    Returns True on success (or tombstone skip), False when the event
-    was DLQ'd.  Either way the caller should commit the offset.
-    """
     topic     = msg.topic()
     partition = msg.partition()
     offset    = msg.offset()
@@ -134,9 +119,7 @@ async def _process_message(
 
     # ── Tombstone ─────────────────────────────────────────────────────────────
     if event.op == 'tombstone':
-        logger.debug(
-            f"[consumer] Tombstone on {topic}[{partition}]@{offset} — skipped"
-        )
+        logger.debug(f"[consumer] Tombstone on {topic}[{partition}]@{offset} — skipped")
         return True
 
     # ── Schema validation ────────────────────────────────────────────────────
@@ -147,31 +130,26 @@ async def _process_message(
         )
         return False
 
-    # ── Route ────────────────────────────────────────────────────────────────
-    routed = router.route(event)
-    if not routed:
+    # ── Route (Postgres) ─────────────────────────────────────────────────────
+    pg_routes = router.route(event)
+    if not pg_routes and event.op != 'tombstone':
         logger.debug(
-            f"[consumer] No route for op={event.op!r} "
-            f"collection={event.collection!r} — skipped"
+            f"[consumer] No Postgres route for collection={event.collection!r} "
+            f"op={event.op!r} — skipped"
         )
-        return True
 
-    # ── Write (row-by-row error handling) ─────────────────────────────────────
+    # ── Write to Postgres ─────────────────────────────────────────────────────
     success = True
-    for (db_target, table, row) in routed:
+    for (table_name, rows, upsert_key) in pg_routes:
         try:
-            if row.get('_delete'):
-                await delete_order(analytics_pool, finance_pool, row['order_id'])
-
-            elif db_target == 'analytics' and table == 'orders_flat':
-                await upsert_orders_flat(analytics_pool, [row])
-
-            elif db_target == 'finance' and table == 'transactions':
-                await upsert_transactions(finance_pool, [row])
-
+            if rows and rows[0].get('_delete'):
+                pk_col = router.engine().get_primary_key(event.collection)
+                await delete_cascade(pg_pool, table_name, pk_col, event.doc_id)
+            else:
+                await upsert_table(pg_pool, table_name, rows, upsert_key)
         except Exception as exc:
             logger.error(
-                f"[consumer] Write error {db_target}.{table} "
+                f"[consumer] PG write error {table_name} "
                 f"op={event.op!r} doc_id={event.doc_id!r}: {exc}"
             )
             send_to_dlq(
@@ -179,12 +157,27 @@ async def _process_message(
                 raw_value or b'', str(exc),
             )
             success = False
-            # Continue processing remaining routes — partial writes are
-            # better than dropping the entire event.
 
+    # ── Write to Neo4j ────────────────────────────────────────────────────────
+    neo4j_ops = router.get_neo4j_ops(event)
+    if neo4j_ops and neo4j_driver:
+        try:
+            await run_ops(neo4j_driver, neo4j_ops)
+        except Exception as exc:
+            logger.error(
+                f"[consumer] Neo4j write error op={event.op!r} "
+                f"doc_id={event.doc_id!r}: {exc}"
+            )
+            send_to_dlq(
+                dlq_producer, topic, partition, offset,
+                raw_value or b'', f"neo4j: {exc}",
+            )
+            success = False
+
+    # ── Metrics ───────────────────────────────────────────────────────────────
     pg_stored_ms = int(time.time() * 1000)
     if event.ts_ms > 0 and kafka_ts_ms > 0:
-        await write_metric(analytics_pool, {
+        await write_metric(pg_pool, {
             'doc_id':           event.doc_id,
             'collection':       event.collection,
             'operation':        event.op,
@@ -201,7 +194,7 @@ async def _process_message(
 
     logger.info(
         f"[consumer] op={event.op!r} collection={event.collection!r} "
-        f"doc_id={event.doc_id!r} ts_ms={event.ts_ms} routes={len(routed)}"
+        f"doc_id={event.doc_id!r} pg_routes={len(pg_routes)} neo4j_ops={len(neo4j_ops)}"
     )
     return success
 
@@ -211,11 +204,21 @@ async def _process_message(
 # ---------------------------------------------------------------------------
 
 async def run_consumer():
-    logger.info("[consumer] Creating PostgreSQL connection pools...")
-    analytics_pool, finance_pool = await _create_pools()
-    logger.info("[consumer] PostgreSQL pools ready (analytics=5434, finance=5433)")
-    await ensure_metrics_table(analytics_pool)
-    logger.info("[consumer] Metrics table ready.")
+    logger.info("[consumer] Starting P2P CDC consumer...")
+
+    pg_pool = await _create_pg_pool()
+    logger.info("[consumer] PostgreSQL pool ready")
+    await ensure_metrics_table(pg_pool)
+
+    neo4j_driver = None
+    try:
+        neo4j_driver = await _create_neo4j_driver()
+        await apply_constraints(neo4j_driver)
+    except Exception as exc:
+        logger.warning(
+            f"[consumer] Neo4j unavailable ({exc!r}) — "
+            "graph writes will be skipped until Neo4j is reachable"
+        )
 
     dlq_producer = create_dlq_producer(BROKER)
 
@@ -226,7 +229,7 @@ async def run_consumer():
         'enable.auto.commit':   False,
         'max.poll.interval.ms': 300_000,
         'session.timeout.ms':   30_000,
-        'broker.address.family': 'v6',
+        'broker.address.family': 'v4',
     })
     consumer.subscribe(TOPICS)
     logger.info(f"[consumer] Subscribed to {TOPICS} as group '{GROUP_ID}'")
@@ -241,29 +244,29 @@ async def run_consumer():
             if not msgs:
                 continue
 
-            batch_ok  = 0
-            batch_dlq = 0
-            batch_real = 0  # messages that were not Kafka-level errors
+            batch_ok   = 0
+            batch_dlq  = 0
+            batch_real = 0
 
             for msg in msgs:
                 if msg.error():
                     err = msg.error()
                     if err.code() == KafkaError._PARTITION_EOF:
                         logger.debug(
-                            f"[consumer] Partition EOF on "
-                            f"{msg.topic()}[{msg.partition()}]"
+                            f"[consumer] EOF on {msg.topic()}[{msg.partition()}]"
                         )
                         continue
                     logger.error(f"[consumer] Kafka error: {err}")
                     continue
 
-                batch_real += 1
+                batch_real      += 1
                 events_consumed += 1
                 _kafka_ts_ms      = msg.timestamp()[1]
                 _doc_size_bytes   = len(msg.value() or b'')
                 _consumer_recv_ms = int(time.time() * 1000)
+
                 ok = await _process_message(
-                    msg, analytics_pool, finance_pool, dlq_producer,
+                    msg, pg_pool, neo4j_driver, dlq_producer,
                     _kafka_ts_ms, _doc_size_bytes, _consumer_recv_ms,
                 )
                 if ok:
@@ -273,8 +276,6 @@ async def run_consumer():
                     batch_dlq  += 1
                     events_dlq += 1
 
-            # Only commit when we actually consumed real messages; committing
-            # with no stored offsets raises _NO_OFFSET (e.g. all-error batch).
             if batch_real > 0:
                 consumer.commit(asynchronous=False)
                 logger.info(
@@ -284,11 +285,12 @@ async def run_consumer():
                 )
 
     except KeyboardInterrupt:
-        logger.info("[consumer] Shutdown signal received — closing gracefully...")
+        logger.info("[consumer] Shutdown signal — closing gracefully...")
     finally:
         consumer.close()
-        await analytics_pool.close()
-        await finance_pool.close()
+        await pg_pool.close()
+        if neo4j_driver:
+            await neo4j_driver.close()
         dlq_producer.flush(timeout=10)
         logger.info("[consumer] Shutdown complete")
 

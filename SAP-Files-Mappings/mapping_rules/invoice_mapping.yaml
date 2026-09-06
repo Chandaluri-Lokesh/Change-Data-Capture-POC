@@ -1,0 +1,103 @@
+# =====================================================================
+# Mapping rules: INVOICE
+# Source: MongoDB collection "invoices"
+# Targets: PostgreSQL (relational) and Neo4j (property graph)
+# =====================================================================
+
+document_type: INVOICE
+source_collection: invoices
+source_key_field: invoice_number
+
+# ---------------------------------------------------------------------
+# PostgreSQL mapping
+# ---------------------------------------------------------------------
+postgresql:
+  parent_table:
+    name: invoices
+    primary_key: invoice_number
+    columns:
+      - { source_field: invoice_number,  column: invoice_number,     type: VARCHAR(20) }
+      - { source_field: po_number,       column: po_number,          type: VARCHAR(20), foreign_key: purchase_orders.po_number }
+      - { source_field: grn_number,      column: grn_number,         type: VARCHAR(20), foreign_key: grns.grn_number }
+      - { source_field: vendor_id,       column: vendor_id,          type: VARCHAR(20) }
+      - { source_field: invoice_date,    column: invoice_date,       type: DATE }
+      - { source_field: due_date,        column: due_date,           type: DATE }
+      - { source_field: currency,        column: currency,           type: CHAR(3) }
+      - { source_field: status,          column: status,             type: VARCHAR(20) }
+      - { source_field: subtotal,        column: subtotal,           type: NUMERIC(14,2) }
+      - { source_field: tax_rate,        column: tax_rate,           type: NUMERIC(5,4) }
+      - { source_field: tax_amount,      column: tax_amount,         type: NUMERIC(14,2) }
+      - { source_field: total_amount,    column: total_amount,       type: NUMERIC(14,2) }
+      - { source_field: updated_at,      column: source_updated_at,  type: TIMESTAMPTZ }
+
+  child_tables:
+    - name: invoice_line_items
+      source_array_field: line_items
+      foreign_key: { column: invoice_number, references: invoices.invoice_number, on_delete: CASCADE }
+      upsert_key: [invoice_number, line_no]
+      columns:
+        - { source_field: line_no,        column: line_no,        type: INTEGER }
+        - { source_field: material_code,  column: material_code,  type: VARCHAR(20) }
+        - { source_field: quantity,       column: quantity,       type: NUMERIC(12,2) }
+        - { source_field: unit_price,     column: unit_price,     type: NUMERIC(12,2) }
+        - { source_field: amount,         column: amount,         type: NUMERIC(14,2) }
+
+  write_mode: UPSERT
+  delete_mode: HARD_DELETE_CASCADE
+
+# ---------------------------------------------------------------------
+# Neo4j mapping
+# ---------------------------------------------------------------------
+neo4j:
+  node:
+    label: Invoice
+    key_property: invoice_number
+    properties:
+      - { source_field: invoice_number,  property: invoice_number }
+      - { source_field: invoice_date,    property: invoice_date }
+      - { source_field: due_date,        property: due_date }
+      - { source_field: currency,        property: currency }
+      - { source_field: status,          property: status }
+      - { source_field: total_amount,    property: total_amount }
+    merge_cypher: |
+      MERGE (i:Invoice {invoice_number: $invoice_number})
+      SET i.invoice_date  = $invoice_date,
+          i.due_date       = $due_date,
+          i.currency       = $currency,
+          i.status         = $status,
+          i.total_amount   = $total_amount
+
+  relationships:
+    - type: BILLS
+      direction: (Invoice)-[:BILLS]->(PurchaseOrder)
+      source_field: po_number
+      target_node: { label: PurchaseOrder, key_property: po_number, source_key_field: po_number }
+      merge_cypher: |
+        MATCH (i:Invoice {invoice_number: $invoice_number})
+        MATCH (p:PurchaseOrder {po_number: $po_number})
+        MERGE (i)-[:BILLS]->(p)
+
+    - type: REFERENCES
+      direction: (Invoice)-[:REFERENCES]->(GRN)
+      source_field: grn_number
+      target_node: { label: GRN, key_property: grn_number, source_key_field: grn_number }
+      merge_cypher: |
+        MATCH (i:Invoice {invoice_number: $invoice_number})
+        MATCH (g:GRN {grn_number: $grn_number})
+        MERGE (i)-[:REFERENCES]->(g)
+
+    - type: INVOICES
+      direction: (Invoice)-[:INVOICES]->(Material)
+      source_array_field: line_items
+      target_node: { label: Material, key_property: material_code, source_key_field: material_code }
+      relationship_properties:
+        - { source_field: quantity,     property: quantity }
+        - { source_field: unit_price,   property: unit_price }
+        - { source_field: amount,       property: amount }
+      merge_cypher: |
+        MATCH (i:Invoice {invoice_number: $invoice_number})
+        MERGE (m:Material {material_code: $material_code})
+        MERGE (i)-[v:INVOICES]->(m)
+        SET v.quantity = $quantity, v.unit_price = $unit_price, v.amount = $amount
+
+  delete_mode: DETACH_DELETE

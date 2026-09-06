@@ -1,0 +1,34 @@
+{
+  "_id": "INV-2026-03390",
+  "document_type": "INVOICE",
+  "invoice_number": "INV-2026-03390",
+  "po_number": "PO-2026-05512",
+  "grn_number": "GRN-2026-00976",
+  "vendor_id": "V-1042",
+  "invoice_date": "2026-09-13",
+  "due_date": "2026-10-13",
+  "currency": "USD",
+  "status": "PENDING_PAYMENT",
+  "line_items": [
+    {
+      "line_no": 1,
+      "material_code": "MAT-7734",
+      "quantity": 500,
+      "unit_price": 18.75,
+      "amount": 9375.00
+    },
+    {
+      "line_no": 2,
+      "material_code": "MAT-8821",
+      "quantity": 195,
+      "unit_price": 6.40,
+      "amount": 1248.00
+    }
+  ],
+  "subtotal": 10623.00,
+  "tax_rate": 0.08,
+  "tax_amount": 849.84,
+  "total_amount": 11472.84,
+  "created_at": "2026-09-13T10:00:00Z",
+  "updated_at": "2026-09-13T10:00:00Z"
+}

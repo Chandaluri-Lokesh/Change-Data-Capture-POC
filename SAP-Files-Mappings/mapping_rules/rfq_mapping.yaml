@@ -1,0 +1,100 @@
+# =====================================================================
+# Mapping rules: RFQ (Request for Quotation)
+# Source: MongoDB collection "rfqs"
+# Targets: PostgreSQL (relational) and Neo4j (property graph)
+# =====================================================================
+
+document_type: RFQ
+source_collection: rfqs
+source_key_field: rfq_number
+
+# ---------------------------------------------------------------------
+# PostgreSQL mapping
+# ---------------------------------------------------------------------
+postgresql:
+  parent_table:
+    name: rfq
+    primary_key: rfq_number
+    columns:
+      - { source_field: rfq_number,          column: rfq_number,          type: VARCHAR(20) }
+      - { source_field: requested_date,      column: requested_date,      type: DATE }
+      - { source_field: requested_by,        column: requested_by,        type: VARCHAR(100) }
+      - { source_field: plant,               column: plant,               type: VARCHAR(30) }
+      - { source_field: status,              column: status,              type: VARCHAR(20) }
+      - { source_field: response_due_date,   column: response_due_date,   type: DATE }
+      - { source_field: updated_at,          column: source_updated_at,   type: TIMESTAMPTZ }
+
+  child_tables:
+    - name: rfq_line_items
+      source_array_field: line_items
+      foreign_key: { column: rfq_number, references: rfq.rfq_number, on_delete: CASCADE }
+      upsert_key: [rfq_number, line_no]
+      columns:
+        - { source_field: line_no,               column: line_no,             type: INTEGER }
+        - { source_field: material_code,         column: material_code,       type: VARCHAR(20) }
+        - { source_field: description,           column: description,         type: VARCHAR(200) }
+        - { source_field: quantity,              column: quantity,            type: NUMERIC(12,2) }
+        - { source_field: unit_of_measure,        column: uom,                 type: VARCHAR(10) }
+        - { source_field: target_delivery_date,   column: target_delivery_date, type: DATE }
+
+    - name: rfq_invited_vendors
+      source_array_field: invited_vendors
+      foreign_key: { column: rfq_number, references: rfq.rfq_number, on_delete: CASCADE }
+      upsert_key: [rfq_number, vendor_id]
+      columns:
+        - { source_field: vendor_id,     column: vendor_id,     type: VARCHAR(20) }
+        - { source_field: vendor_name,   column: vendor_name,   type: VARCHAR(100) }
+        - { source_field: invited_on,    column: invited_on,    type: DATE }
+
+  write_mode: UPSERT   # INSERT ... ON CONFLICT (primary_key / upsert_key) DO UPDATE SET ...
+  delete_mode: HARD_DELETE_CASCADE   # a MongoDB delete removes the parent row; child rows cascade
+
+# ---------------------------------------------------------------------
+# Neo4j mapping
+# ---------------------------------------------------------------------
+neo4j:
+  node:
+    label: RFQ
+    key_property: rfq_number
+    properties:
+      - { source_field: rfq_number,        property: rfq_number }
+      - { source_field: requested_date,    property: requested_date }
+      - { source_field: status,            property: status }
+      - { source_field: plant,             property: plant }
+      - { source_field: response_due_date, property: response_due_date }
+    merge_cypher: |
+      MERGE (r:RFQ {rfq_number: $rfq_number})
+      SET r.requested_date    = $requested_date,
+          r.status             = $status,
+          r.plant              = $plant,
+          r.response_due_date  = $response_due_date
+
+  relationships:
+    - type: INVITED
+      direction: (RFQ)-[:INVITED]->(Vendor)
+      source_array_field: invited_vendors
+      target_node: { label: Vendor, key_property: vendor_id, source_key_field: vendor_id }
+      relationship_properties:
+        - { source_field: invited_on, property: invited_on }
+      merge_cypher: |
+        MATCH (r:RFQ {rfq_number: $rfq_number})
+        MERGE (v:Vendor {vendor_id: $vendor_id})
+        SET v.vendor_name = $vendor_name
+        MERGE (r)-[i:INVITED]->(v)
+        SET i.invited_on = $invited_on
+
+    - type: REQUESTS
+      direction: (RFQ)-[:REQUESTS]->(Material)
+      source_array_field: line_items
+      target_node: { label: Material, key_property: material_code, source_key_field: material_code }
+      relationship_properties:
+        - { source_field: quantity,              property: quantity }
+        - { source_field: target_delivery_date,  property: target_delivery_date }
+      merge_cypher: |
+        MATCH (r:RFQ {rfq_number: $rfq_number})
+        MERGE (m:Material {material_code: $material_code})
+        SET m.description = $description
+        MERGE (r)-[q:REQUESTS]->(m)
+        SET q.quantity = $quantity, q.target_delivery_date = $target_delivery_date
+
+  delete_mode: DETACH_DELETE   # a MongoDB delete removes the RFQ node and its relationships

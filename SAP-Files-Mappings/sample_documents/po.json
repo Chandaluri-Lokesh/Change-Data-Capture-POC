@@ -1,0 +1,37 @@
+{
+  "_id": "PO-2026-05512",
+  "document_type": "PO",
+  "po_number": "PO-2026-05512",
+  "rfq_number": "RFQ-2026-00841",
+  "vendor_id": "V-1042",
+  "vendor_name": "Ashford Industrial Supplies",
+  "order_date": "2026-08-14",
+  "delivery_date": "2026-09-15",
+  "plant": "Plant-Chennai-01",
+  "currency": "USD",
+  "status": "OPEN",
+  "payment_terms": "NET-30",
+  "line_items": [
+    {
+      "line_no": 1,
+      "material_code": "MAT-7734",
+      "description": "Stainless Steel Pipe Fittings, DN50",
+      "quantity": 500,
+      "unit_of_measure": "EA",
+      "unit_price": 18.75,
+      "line_total": 9375.00
+    },
+    {
+      "line_no": 2,
+      "material_code": "MAT-8821",
+      "description": "Industrial Gasket Set",
+      "quantity": 200,
+      "unit_of_measure": "EA",
+      "unit_price": 6.40,
+      "line_total": 1280.00
+    }
+  ],
+  "order_total": 10655.00,
+  "created_at": "2026-08-14T11:05:00Z",
+  "updated_at": "2026-08-14T11:05:00Z"
+}
