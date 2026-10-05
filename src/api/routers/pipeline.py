@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-CONNECT_URL = os.getenv('KAFKA_CONNECT_REST_URL', 'http://localhost:8083')
+CONNECT_URL = os.getenv('KAFKA_CONNECT_REST_URL', 'http://127.0.0.1:8083')
 BROKER      = os.getenv('KAFKA_BROKER_URL',       'localhost:9092')
 DLQ_TOPIC   = 'poc.dlq'
 
@@ -53,9 +53,8 @@ def _kafka_lag() -> list:
         cfg = {
             'bootstrap.servers':     BROKER,
             'broker.address.family': 'v4',
-            'socket.timeout.ms':     5000,
-            'request.timeout.ms':    5000,
-            'metadata.request.timeout.ms': 5000,
+            'socket.timeout.ms':     3000,
+            'request.timeout.ms':    3000,
         }
         admin = AdminClient(cfg)
         group_id = 'p2p-pipeline-consumer'
@@ -64,19 +63,24 @@ def _kafka_lag() -> list:
             [ConsumerGroupTopicPartitions(group_id)],
         )
 
-        results = []
+        committed_tps = []
         for fut in metadata.values():
-            group_partitions = fut.result(timeout=5)
+            group_partitions = fut.result(timeout=4)
             for tp in group_partitions.topic_partitions:
-                if tp.error:
-                    continue
-                consumer = Consumer({**cfg, 'group.id': '__verify_lag__'})
-                try:
-                    wm = consumer.get_watermark_offsets(
-                        TopicPartition(tp.topic, tp.partition), timeout=3,
-                    )
-                finally:
-                    consumer.close()
+                if not tp.error:
+                    committed_tps.append(tp)
+
+        if not committed_tps:
+            return []
+
+        # Reuse a single consumer for all watermark checks
+        consumer = Consumer({**cfg, 'group.id': '__lag_check__'})
+        results = []
+        try:
+            for tp in committed_tps:
+                wm = consumer.get_watermark_offsets(
+                    TopicPartition(tp.topic, tp.partition), timeout=2,
+                )
                 committed  = tp.offset if tp.offset >= 0 else 0
                 end_offset = wm[1] if wm else 0
                 results.append({
@@ -86,6 +90,8 @@ def _kafka_lag() -> list:
                     'end':       end_offset,
                     'lag':       max(0, end_offset - committed),
                 })
+        finally:
+            consumer.close()
         return results
     except Exception as exc:
         logger.warning(f"[pipeline] Lag check failed: {exc}")
@@ -96,11 +102,20 @@ def _kafka_lag() -> list:
 async def pipeline_status():
     import asyncio
     loop = asyncio.get_event_loop()
-    connectors, lag = await asyncio.gather(
-        loop.run_in_executor(None, _connector_statuses),
-        loop.run_in_executor(None, _kafka_lag),
-    )
 
+    async def _connectors():
+        try:
+            return await asyncio.wait_for(loop.run_in_executor(None, _connector_statuses), timeout=6)
+        except asyncio.TimeoutError:
+            return [{'name': 'p2p-connector', 'state': 'UNREACHABLE', 'tasks': []}]
+
+    async def _lag():
+        try:
+            return await asyncio.wait_for(loop.run_in_executor(None, _kafka_lag), timeout=10)
+        except asyncio.TimeoutError:
+            return []
+
+    connectors, lag = await asyncio.gather(_connectors(), _lag())
     all_running = all(c['state'] == 'RUNNING' for c in connectors)
     total_lag = sum(r['lag'] for r in lag)
 
