@@ -96,13 +96,17 @@ def _kafka_lag() -> list:
 async def pipeline_status():
     import asyncio
     loop = asyncio.get_event_loop()
-    connectors = await loop.run_in_executor(None, _connector_statuses)
+    connectors, lag = await asyncio.gather(
+        loop.run_in_executor(None, _connector_statuses),
+        loop.run_in_executor(None, _kafka_lag),
+    )
 
     all_running = all(c['state'] == 'RUNNING' for c in connectors)
+    total_lag = sum(r['lag'] for r in lag)
 
     return {
         'overall':    'HEALTHY' if all_running else 'DEGRADED',
         'connectors': connectors,
-        'kafka_lag':  [],
-        'total_lag':  0,
+        'kafka_lag':  lag,
+        'total_lag':  total_lag,
     }

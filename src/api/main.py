@@ -28,7 +28,6 @@ if _src not in sys.path:
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from writer.pg_writer import create_pool, ensure_metrics_table
 from writer.neo4j_writer import create_driver, apply_constraints
@@ -62,7 +61,7 @@ async def lifespan(app: FastAPI):
             uri=os.getenv('NEO4J_URI',      'bolt://localhost:7687'),
             user=os.getenv('NEO4J_USER',    'neo4j'),
             password=os.getenv('NEO4J_PASSWORD', 'neo4j'),
-            database=os.getenv('NEO4J_DATABASE', None),
+            database=os.getenv('NEO4J_DATABASE', 'DBMD-Minor'),
         )
         await apply_constraints(neo4j_driver)
     except Exception as exc:
@@ -111,10 +110,4 @@ app.include_router(metrics.router,    prefix='/api/metrics',    tags=['Metrics']
 app.include_router(graph.router,      prefix='/api/graph',      tags=['Graph'])
 app.include_router(simulator.router,  prefix='/api/simulate',   tags=['Simulator'])
 
-# ── Serve React build (production) ───────────────────────────────────────────
-_web_dist = os.path.join(_src, '..', 'web', 'dist')
-if os.path.isdir(_web_dist):
-    app.mount('/', StaticFiles(directory=_web_dist, html=True), name='static')
-    logger.info(f"Serving React build from {_web_dist}")
-else:
-    logger.info("React build not found — run 'cd web && npm run build' for production mode")
+# Frontend is served from the separate cdc-dashboard-ui repo (http://localhost:5173 in dev)

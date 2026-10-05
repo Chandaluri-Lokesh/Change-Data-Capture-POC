@@ -14,7 +14,7 @@ systemLog:
   path: C:\Program Files\MongoDB\Server\8.2\log\mongod.log
 
 net:
-  port: 27017
+  port: 27018
   bindIpAll: true
 
 replication:
@@ -30,4 +30,4 @@ Start-Sleep -Seconds 2
 net start MongoDB
 Start-Sleep -Seconds 3
 
-Write-Host "Done. MongoDB is now running with replica set rs0 on all interfaces."
+Write-Host "Done. MongoDB is now running on port 27018 with replica set rs0 on all interfaces."

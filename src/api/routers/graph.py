@@ -92,36 +92,33 @@ async def get_subgraph(collection: str, doc_id: str, request: Request, depth: in
     label, key_prop = label_info
 
     depth = min(max(depth, 1), 4)  # clamp 1–4
-    cypher = f"""
-        MATCH (root:{label} {{{key_prop}: $doc_id}})
-        OPTIONAL MATCH path = (root)-[r*1..{depth}]-(m)
-        UNWIND (nodes(path) + [root]) AS n
-        UNWIND (relationships(path) + []) AS rel
-        RETURN DISTINCT n, rel
-        LIMIT 200
-    """
+
+    # Return root + up to `depth` hops of neighbours as flat node/rel pairs.
+    # OPTIONAL MATCH chains ensure nulls are handled gracefully by _neo4j_to_graph.
+    if depth == 1:
+        cypher = f"""
+            MATCH (root:{label} {{{key_prop}: $doc_id}})
+            OPTIONAL MATCH (root)-[r1]-(n1)
+            RETURN root, r1, n1, null AS r2, null AS n2
+            LIMIT 200
+        """
+    else:
+        cypher = f"""
+            MATCH (root:{label} {{{key_prop}: $doc_id}})
+            OPTIONAL MATCH (root)-[r1]-(n1)
+            OPTIONAL MATCH (n1)-[r2]-(n2) WHERE n2 <> root
+            RETURN root, r1, n1, r2, n2
+            LIMIT 200
+        """
 
     try:
         async with driver.session() as session:
             result = await session.run(cypher, doc_id=doc_id)
-            records = await result.data()
-    except Exception as exc:
-        logger.error(f"[graph] Neo4j query failed: {exc}")
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    # Simpler fallback query that works cleanly with the driver
-    cypher2 = f"""
-        MATCH (root:{label} {{{key_prop}: $doc_id}})
-        OPTIONAL MATCH (root)-[rel]-(neighbor)
-        RETURN root, rel, neighbor
-    """
-    try:
-        async with driver.session() as session:
-            result = await session.run(cypher2, doc_id=doc_id)
             records = []
             async for record in result:
                 records.append(dict(record))
     except Exception as exc:
+        logger.error(f"[graph] Neo4j query failed: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
     return _neo4j_to_graph(records)
