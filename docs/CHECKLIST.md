@@ -1,6 +1,6 @@
 # POC Debezium - Implementation Master Checklist
 
-This checklist tracks the precise 6-Phase plan from the core HTML design, updated exclusively for a Native Local (Windows + WSL) architecture (no Docker).
+This checklist tracks the complete implementation across all phases, running natively on Windows + WSL (no Docker).
 
 ## Phase 1: Infrastructure Setup (Foundation) - [COMPLETED]
 - [x] **M1 — Infrastructure Stack**
@@ -67,8 +67,62 @@ This checklist tracks the precise 6-Phase plan from the core HTML design, update
   - [x] `CDCJsonFormatter` for structured JSON log lines (op_type, collection, latency_ms …).
   - [x] `scripts/dlq_replay.py` — replay poc.dlq back to source topics with retry guard.
 
+## Phase 7: P2P Pipeline Extension (All 5 Collections) - [COMPLETED]
+- [x] **M14 — YAML Mapping Engine (`src/engine/mapping_engine.py`)**
+  - [x] Loads all `*_mapping.yaml` files at startup; registry keyed by collection name.
+  - [x] `get_pg_routes()` — expands parent + child table rows from a single CDC event.
+  - [x] `get_neo4j_ops()` — generates Cypher MERGE / DETACH DELETE ops from YAML.
+  - [x] Handles `source_array_field` expansion for line items and invited vendors.
+  - [x] Handles nullable fields, date coercion, and decimal type coercion.
+- [x] **M15 — P2P Simulator (`src/generator/p2p_simulator.py`)**
+  - [x] Generates realistic RFQ → PO → ASN → GRN → Invoice chains.
+  - [x] Weighted update/delete operations on existing documents.
+  - [x] Continuous loop mode for load testing.
+- [x] **M16 — P2P Connector (`connectors/p2p-connector.json`)**
+  - [x] Watches all 5 collections: `mydb.rfqs`, `mydb.purchase_orders`, `mydb.asns`, `mydb.grns`, `mydb.invoices`.
+  - [x] Produces 5 Kafka topics: `poc.mydb.rfqs`, `poc.mydb.purchase_orders`, `poc.mydb.asns`, `poc.mydb.grns`, `poc.mydb.invoices`.
+- [x] **M17 — PostgreSQL P2P DDL (`init/postgres/04_p2p.sql`)**
+  - [x] 10 tables: rfq, rfq_line_items, rfq_invited_vendors, purchase_orders, po_line_items, asns, asn_line_items, grns, grn_line_items, invoices, invoice_line_items.
+  - [x] Foreign key constraints linking child tables to parents and cross-document references.
+- [x] **M18 — Updated Consumer + Writers**
+  - [x] `kafka_consumer.py` subscribes to all 5 P2P topics.
+  - [x] `pg_writer.py` — generic `upsert_table()` and `delete_cascade()` driven by mapping engine.
+  - [x] `router.py` — delegates to `mapping_engine.get_pg_routes()`.
+
+## Phase 8: Neo4j Graph Target - [COMPLETED]
+- [x] **M19 — Neo4j Writer (`src/writer/neo4j_writer.py`)**
+  - [x] Async sessions via `AsyncGraphDatabase` (official neo4j Python driver).
+  - [x] `merge_node()` — runs node MERGE Cypher from YAML verbatim.
+  - [x] `merge_relationships()` — iterates relationship list from YAML; expands array-based relationships.
+  - [x] `delete_node()` — `DETACH DELETE` on op=d.
+  - [x] Retry on transient Neo4j errors (deadlock, leader switch).
+- [x] **M20 — Neo4j Constraints (`init/neo4j/constraints.cypher`)**
+  - [x] Uniqueness constraints for all 7 node types: RFQ, PurchaseOrder, ASN, GRN, Invoice, Vendor, Material.
+  - [x] Applied idempotently (`IF NOT EXISTS`).
+- [x] **M21 — Consumer Integration**
+  - [x] Neo4j driver acquired at startup alongside Postgres pools.
+  - [x] Neo4j ops run after Postgres writes succeed; failure routes to DLQ.
+
+## Phase 9: FastAPI + React Web Application - [COMPLETED]
+- [x] **M22 — FastAPI Backend (`src/api/`)**
+  - [x] `main.py` — lifespan setup (Postgres pools + Neo4j driver); all routers registered.
+  - [x] `routers/documents.py` — POST insert, DELETE, GET list per document type.
+  - [x] `routers/pipeline.py` — connector health, Kafka consumer lag.
+  - [x] `routers/metrics.py` — summary, recent, collections, benchmarks; WebSocket stream.
+  - [x] `routers/graph.py` — subgraph explorer, stats overview.
+  - [x] `routers/schema.py` — live MongoDB, PostgreSQL, Neo4j schema introspection.
+  - [x] `routers/simulator.py` — start/stop/status continuous simulator; single chain trigger.
+- [x] **M23 — React Frontend (`cdc-dashboard-ui/`)**
+  - [x] `Home` — pipeline overview, P2P walkthrough, doc types, feature nav cards, tech stack.
+  - [x] `Dashboard` — live KPI cards, E2E latency time-series (WebSocket), collection breakdown.
+  - [x] `Documents` — insert form + right-panel document list with status badges.
+  - [x] `Graph` — force-directed Neo4j graph, node inspector, responsive document list grid.
+  - [x] `Pipeline` — connector status, Kafka consumer lag table, simulator controls.
+  - [x] `Schema` — three-tab browser (MongoDB / PostgreSQL / Neo4j) with CRUD query blocks.
+  - [x] `Performance` — stat cards, stage bar chart, latency radar, operation table, scale projections.
+
 ## Package Structure
-- [x] `__init__.py` files added to all src subpackages (consumer, transformer, writer, ops, connector, generator).
+- [x] `__init__.py` files added to all src subpackages (consumer, transformer, writer, ops, connector, generator, engine, api).
 - [x] Removed: `deprecated/`, `init/mongo_init.js`, `src/connector/register.py` (superseded or blank).
 - [x] Unit tests: `tests/test_parser.py`, `tests/test_transformer.py`, `tests/test_writer.py`.
 - [x] `tests/conftest.py` sets `PYTHONPATH=src` for all tests.
