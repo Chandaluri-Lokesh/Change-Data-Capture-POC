@@ -82,8 +82,8 @@ def _node_id(node) -> str:
 @router.get('/stats/overview')
 async def graph_overview(request: Request):
     """Node and relationship counts per label."""
-    driver = request.app.state.neo4j_driver
-    if not driver:
+    conn = request.app.state.neo4j_conn
+    if not conn:
         raise HTTPException(status_code=503, detail='Neo4j not connected')
 
     cypher = """
@@ -94,11 +94,11 @@ async def graph_overview(request: Request):
         ORDER BY count DESC
     """
     try:
-        async with driver.session(database=getattr(driver, '_cdc_database', None)) as session:
+        async with conn.driver.session(database=conn.database) as session:
             result = await session.run(cypher)
             node_counts = [{'label': r['label'], 'count': r['count']}
                            async for r in result]
-        async with driver.session(database=getattr(driver, '_cdc_database', None)) as session:
+        async with conn.driver.session(database=conn.database) as session:
             result = await session.run(
                 "MATCH ()-[r]->() RETURN type(r) AS type, COUNT(*) AS count ORDER BY count DESC"
             )
@@ -113,8 +113,8 @@ async def graph_overview(request: Request):
 @router.get('/{collection}/{doc_id}')
 async def get_subgraph(collection: str, doc_id: str, request: Request, depth: int = 2):
     """Return the Neo4j subgraph up to `depth` hops around the given document node."""
-    driver = request.app.state.neo4j_driver
-    if not driver:
+    conn = request.app.state.neo4j_conn
+    if not conn:
         raise HTTPException(status_code=503, detail='Neo4j not connected')
 
     label_info = LABEL_MAP.get(collection)
@@ -143,7 +143,7 @@ async def get_subgraph(collection: str, doc_id: str, request: Request, depth: in
         """
 
     try:
-        async with driver.session(database=getattr(driver, '_cdc_database', None)) as session:
+        async with conn.driver.session(database=conn.database) as session:
             result = await session.run(cypher, doc_id=doc_id)
             records = []
             async for record in result:

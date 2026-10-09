@@ -81,7 +81,7 @@ async def _create_pg_pool():
     )
 
 
-async def _create_neo4j_driver():
+async def _create_neo4j_conn():
     return await create_driver(
         uri=os.getenv('NEO4J_URI',           'bolt://localhost:7687'),
         user=os.getenv('NEO4J_USER',         'neo4j'),
@@ -93,7 +93,7 @@ async def _create_neo4j_driver():
 async def _try_connect_neo4j():
     """Attempt to connect to Neo4j; returns driver on success, None on failure."""
     try:
-        driver = await _create_neo4j_driver()
+        driver = await _create_neo4j_conn()
         await apply_constraints(driver)
         logger.info("[consumer] Neo4j (re)connected successfully.")
         return driver
@@ -107,7 +107,7 @@ async def _try_connect_neo4j():
 # ---------------------------------------------------------------------------
 
 async def _process_message(
-    msg, pg_pool, neo4j_driver, dlq_producer,
+    msg, pg_pool, neo4j_conn, dlq_producer,
     kafka_ts_ms: int, doc_size_bytes: int, consumer_recv_ms: int,
 ) -> tuple:
     topic     = msg.topic()
@@ -168,9 +168,9 @@ async def _process_message(
     # ── Write to Neo4j ────────────────────────────────────────────────────────
     neo4j_failed = False
     neo4j_ops = router.get_neo4j_ops(event)
-    if neo4j_ops and neo4j_driver:
+    if neo4j_ops and neo4j_conn:
         try:
-            await run_ops(neo4j_driver, neo4j_ops)
+            await run_ops(neo4j_conn, neo4j_ops)
         except Exception as exc:
             logger.error(
                 f"[consumer] Neo4j write error op={event.op!r} "
@@ -181,23 +181,20 @@ async def _process_message(
     # ── Metrics ───────────────────────────────────────────────────────────────
     pg_stored_ms = int(time.time() * 1000)
     if event.ts_ms > 0 and kafka_ts_ms > 0:
-        try:
-            await write_metric(pg_pool, {
-                'doc_id':           event.doc_id,
-                'collection':       event.collection,
-                'operation':        event.op,
-                'doc_size_bytes':   doc_size_bytes,
-                'mongo_ts_ms':      event.ts_ms,
-                'kafka_ts_ms':      kafka_ts_ms,
-                'consumer_recv_ms': consumer_recv_ms,
-                'pg_stored_ms':     pg_stored_ms,
-                'debezium_lat_ms':  max(0, kafka_ts_ms    - event.ts_ms),
-                'consumer_lat_ms':  max(0, consumer_recv_ms - kafka_ts_ms),
-                'write_lat_ms':     max(0, pg_stored_ms   - consumer_recv_ms),
-                'e2e_lat_ms':       max(0, pg_stored_ms   - event.ts_ms),
-            })
-        except Exception as exc:
-            logger.warning(f"[consumer] Metric write failed for doc_id={event.doc_id!r}: {exc}")
+        await write_metric(pg_pool, {
+            'doc_id':           event.doc_id,
+            'collection':       event.collection,
+            'operation':        event.op,
+            'doc_size_bytes':   doc_size_bytes,
+            'mongo_ts_ms':      event.ts_ms,
+            'kafka_ts_ms':      kafka_ts_ms,
+            'consumer_recv_ms': consumer_recv_ms,
+            'pg_stored_ms':     pg_stored_ms,
+            'debezium_lat_ms':  max(0, kafka_ts_ms    - event.ts_ms),
+            'consumer_lat_ms':  max(0, consumer_recv_ms - kafka_ts_ms),
+            'write_lat_ms':     max(0, pg_stored_ms   - consumer_recv_ms),
+            'e2e_lat_ms':       max(0, pg_stored_ms   - event.ts_ms),
+        })
 
     logger.info(
         f"[consumer] op={event.op!r} collection={event.collection!r} "
@@ -217,7 +214,7 @@ async def run_consumer():
     logger.info("[consumer] PostgreSQL pool ready")
     await ensure_metrics_table(pg_pool)
 
-    neo4j_driver = await _try_connect_neo4j()
+    neo4j_conn = await _try_connect_neo4j()
 
     dlq_producer = create_dlq_producer(BROKER)
 
@@ -244,8 +241,8 @@ async def run_consumer():
                 continue
 
             # ── Attempt Neo4j reconnect if driver is down ─────────────────────
-            if neo4j_driver is None:
-                neo4j_driver = await _try_connect_neo4j()
+            if neo4j_conn is None:
+                neo4j_conn = await _try_connect_neo4j()
 
             batch_ok        = 0
             batch_dlq       = 0
@@ -270,7 +267,7 @@ async def run_consumer():
                 _consumer_recv_ms = int(time.time() * 1000)
 
                 ok, neo4j_failed = await _process_message(
-                    msg, pg_pool, neo4j_driver, dlq_producer,
+                    msg, pg_pool, neo4j_conn, dlq_producer,
                     _kafka_ts_ms, _doc_size_bytes, _consumer_recv_ms,
                 )
                 if neo4j_failed:
@@ -284,12 +281,12 @@ async def run_consumer():
 
             # ── If Neo4j failed this batch, close stale driver and reconnect ──
             if batch_neo4j_err:
-                if neo4j_driver:
+                if neo4j_conn:
                     try:
-                        await neo4j_driver.close()
+                        await neo4j_conn.close()
                     except Exception:
                         pass
-                neo4j_driver = await _try_connect_neo4j()
+                neo4j_conn = await _try_connect_neo4j()
 
             if batch_real > 0:
                 consumer.commit(asynchronous=False)
@@ -304,9 +301,9 @@ async def run_consumer():
     finally:
         consumer.close()
         await pg_pool.close()
-        if neo4j_driver:
+        if neo4j_conn:
             try:
-                await neo4j_driver.close()
+                await neo4j_conn.close()
             except Exception:
                 pass
         dlq_producer.flush(timeout=10)

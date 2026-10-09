@@ -55,18 +55,18 @@ async def lifespan(app: FastAPI):
     app.state.pg_pool = pg_pool
     logger.info("PostgreSQL pool ready")
 
-    neo4j_driver = None
+    neo4j_conn = None
     try:
-        neo4j_driver = await create_driver(
-            uri=os.getenv('NEO4J_URI',      'bolt://localhost:7687'),
-            user=os.getenv('NEO4J_USER',    'neo4j'),
-            password=os.getenv('NEO4J_PASSWORD', 'neo4j'),
+        neo4j_conn = await create_driver(
+            uri=os.getenv('NEO4J_URI',           'bolt://localhost:7687'),
+            user=os.getenv('NEO4J_USER',         'neo4j'),
+            password=os.getenv('NEO4J_PASSWORD', 'password'),
             database=os.getenv('NEO4J_DATABASE', 'DBMD-Minor'),
         )
-        await apply_constraints(neo4j_driver)
+        await apply_constraints(neo4j_conn)
     except Exception as exc:
         logger.warning(f"Neo4j unavailable at startup ({exc!r}) — graph endpoints will return 503")
-    app.state.neo4j_driver = neo4j_driver
+    app.state.neo4j_conn = neo4j_conn
 
     from pymongo import MongoClient
     mongo = MongoClient(
@@ -81,8 +81,8 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ─────────────────────────────────────────────────────────────
     await pg_pool.close()
-    if neo4j_driver:
-        await neo4j_driver.close()
+    if neo4j_conn:
+        await neo4j_conn.close()
     mongo.close()
     logger.info("Application shutdown complete")
 

@@ -19,31 +19,32 @@ Call `driver.close()` on shutdown.
 """
 
 import logging
-from typing import List, Tuple
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 from neo4j import AsyncGraphDatabase, AsyncDriver
 
 logger = logging.getLogger(__name__)
 
 
-async def create_driver(uri: str, user: str, password: str, database: str = None) -> AsyncDriver:
-    """Create and verify an async Neo4j driver connection."""
+@dataclass
+class Neo4jConnection:
+    """Bundles the async driver with its target database name."""
+    driver: AsyncDriver
+    database: Optional[str]
+
+    async def close(self):
+        await self.driver.close()
+
+
+async def create_driver(
+    uri: str, user: str, password: str, database: str = None,
+) -> Neo4jConnection:
+    """Create, verify, and return a Neo4jConnection."""
     driver = AsyncGraphDatabase.driver(uri, auth=(user, password))
     await driver.verify_connectivity()
     logger.info(f"[neo4j] Connected to {uri} (database={database or 'default'})")
-    driver._cdc_database = database  # stash for session calls
-    return driver
-
-
-async def run_cypher(driver: AsyncDriver, cypher: str, params: dict) -> None:
-    """
-    Execute a single Cypher statement with params as a write transaction.
-    Transient errors are retried by the driver automatically.
-    Permanent errors are logged and re-raised for the consumer's DLQ handler.
-    """
-    db = getattr(driver, '_cdc_database', None)
-    async with driver.session(database=db) as session:
-        await session.execute_write(_tx_run, cypher, params)
+    return Neo4jConnection(driver=driver, database=database)
 
 
 async def _tx_run(tx, cypher: str, params: dict):
@@ -51,7 +52,7 @@ async def _tx_run(tx, cypher: str, params: dict):
 
 
 async def run_ops(
-    driver: AsyncDriver,
+    conn: Neo4jConnection,
     ops: List[Tuple[str, dict]],
 ) -> None:
     """
@@ -60,10 +61,11 @@ async def run_ops(
     Raises on the first permanent error.
     """
     for cypher, params in ops:
-        await run_cypher(driver, cypher, params)
+        async with conn.driver.session(database=conn.database) as session:
+            await session.execute_write(_tx_run, cypher, params)
 
 
-async def apply_constraints(driver: AsyncDriver) -> None:
+async def apply_constraints(conn: Neo4jConnection) -> None:
     """
     Create Neo4j uniqueness constraints for all P2P node types.
     Idempotent — uses IF NOT EXISTS.
@@ -78,8 +80,7 @@ async def apply_constraints(driver: AsyncDriver) -> None:
         "CREATE CONSTRAINT vendor_unique IF NOT EXISTS FOR (v:Vendor) REQUIRE v.vendor_id IS UNIQUE",
         "CREATE CONSTRAINT material_unique IF NOT EXISTS FOR (m:Material) REQUIRE m.material_code IS UNIQUE",
     ]
-    db = getattr(driver, '_cdc_database', None)
-    async with driver.session(database=db) as session:
+    async with conn.driver.session(database=conn.database) as session:
         for cypher in constraints:
             try:
                 await session.run(cypher)

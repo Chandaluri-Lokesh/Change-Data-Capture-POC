@@ -133,13 +133,17 @@ async def delete_cascade(
     if not pk_val:
         logger.warning(f"[pg_writer] delete_cascade called with empty pk_val for {table_name} — skipping")
         return
-    async with pool.acquire() as conn:
-        deleted = await conn.fetchval(
-            f'DELETE FROM {table_name} WHERE "{pk_col}" = $1 RETURNING "{pk_col}"',
-            pk_val,
-        )
-        if deleted:
-            logger.info(f"[pg_writer] Deleted {table_name} row {pk_val!r} (cascade)")
+
+    async def _run():
+        async with pool.acquire() as conn:
+            deleted = await conn.fetchval(
+                f'DELETE FROM {table_name} WHERE "{pk_col}" = $1 RETURNING "{pk_col}"',
+                pk_val,
+            )
+            if deleted:
+                logger.info(f"[pg_writer] Deleted {table_name} row {pk_val!r} (cascade)")
+
+    await _execute_with_retry(pool, _run)
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +152,7 @@ async def delete_cascade(
 
 async def ensure_metrics_table(pool: asyncpg.Pool) -> None:
     """Create cdc_pipeline_metrics if it does not already exist."""
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn:  # startup-only — retry not needed
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS cdc_pipeline_metrics (
                 id               SERIAL PRIMARY KEY,
