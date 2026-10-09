@@ -47,11 +47,14 @@ Mapping YAML types → Python:
 
 import logging
 import os
+import re
 from datetime import date, datetime, timezone
 from glob import glob
 from typing import List, Optional, Tuple
 
 import yaml
+
+_CYPHER_PARAM_RE = re.compile(r'\$(\w+)')
 
 logger = logging.getLogger(__name__)
 
@@ -251,20 +254,22 @@ class MappingEngine:
 
             cypher = rel['merge_cypher'].strip()
 
+            needed = set(_CYPHER_PARAM_RE.findall(cypher))
+
             if 'source_array_field' in rel:
                 # One Cypher execution per array element
                 arr = document.get(rel['source_array_field']) or []
                 for item in arr:
                     if not isinstance(item, dict):
                         continue
-                    p = {mapping['source_key_field']: source_key_val}
-                    p.update(document)   # parent fields (for SET clauses)
-                    p.update(item)       # item fields (override with item values)
-                    ops.append((cypher, p))
+                    merged = {mapping['source_key_field']: source_key_val}
+                    merged.update(document)
+                    merged.update(item)
+                    ops.append((cypher, {k: merged.get(k) for k in needed}))
             else:
                 # Single relationship from a scalar field on the document
-                p = dict(document)
-                p[mapping['source_key_field']] = source_key_val
-                ops.append((cypher, p))
+                merged = dict(document)
+                merged[mapping['source_key_field']] = source_key_val
+                ops.append((cypher, {k: merged.get(k) for k in needed}))
 
         return ops
