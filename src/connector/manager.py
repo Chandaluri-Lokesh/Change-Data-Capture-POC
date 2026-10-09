@@ -46,7 +46,7 @@ def register_connector(json_file_name: str) -> None:
             logger.info(f"Connector '{name}' exists — updating config in-place...")
             r = requests.put(
                 f'{CONNECT_URL}/connectors/{name}/config',
-                json=config['config'], timeout=10,
+                json=config['config'], timeout=60,
             )
             r.raise_for_status()
         else:
@@ -57,6 +57,8 @@ def register_connector(json_file_name: str) -> None:
         wait_for_running(name)
     except requests.exceptions.ConnectionError:
         logger.error(f"Cannot reach Kafka Connect at {CONNECT_URL}. Is it running?")
+    except requests.exceptions.Timeout:
+        logger.error(f"Request to Kafka Connect timed out while registering '{name}'.")
 
 
 def wait_for_running(name: str, retries: int = 15) -> bool:

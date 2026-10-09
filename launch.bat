@@ -16,9 +16,7 @@ echo.
 set ROOT=%~dp0
 set VENV=%ROOT%.venv
 set PY=%VENV%\Scripts\python.exe
-set MONGOD="C:\Program Files\MongoDB\Server\8.2\bin\mongod.exe"
 set MONGO_PORT=27018
-set MONGO_DATA=%ROOT%mongodb-data
 set API_PORT=8000
 set UI_PORT=5173
 
@@ -29,24 +27,19 @@ if not exist "%VENV%\Scripts\activate.bat" (
 )
 
 :: ── Step 1: MongoDB ───────────────────────────────────────────────────────
-echo [1/7] Starting MongoDB replica set on port %MONGO_PORT%...
+echo [1/7] Starting MongoDB Windows service on port %MONGO_PORT%...
 netstat -an | findstr ":%MONGO_PORT% " | findstr "LISTENING" >nul 2>&1
 if not errorlevel 1 (
     echo   [OK] MongoDB already running on :%MONGO_PORT%
     goto :mongo_done
 )
-if not exist %MONGOD% (
-    echo   [FAIL] mongod.exe not found at %MONGOD%
-    echo          Update the MONGOD variable in launch.bat to your install path.
+echo   Starting MongoDB service (requires it to be installed as a Windows service)...
+net start MongoDB >nul 2>&1
+if errorlevel 1 (
+    echo   [FAIL] Could not start MongoDB service.
+    echo          Run restart_mongo_admin.ps1 as Administrator to install/configure it.
     goto :fail
 )
-start "MongoDB :27018" %MONGOD% ^
-    --replSet rs0 ^
-    --bind_ip_all ^
-    --port %MONGO_PORT% ^
-    --dbpath "%MONGO_DATA%" ^
-    --logpath "%MONGO_DATA%\mongod.log" ^
-    --logappend
 echo   Waiting for MongoDB to boot...
 timeout /t 4 /nobreak >nul
 :mongo_done
