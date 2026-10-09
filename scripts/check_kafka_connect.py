@@ -1,4 +1,4 @@
-"""Verify Kafka Connect is reachable (called by launch.bat)."""
+"""Verify Kafka Connect is reachable. Usage: python scripts/check_kafka_connect.py [url]"""
 import sys
 import requests
 

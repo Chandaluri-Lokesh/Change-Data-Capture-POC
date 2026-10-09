@@ -35,17 +35,11 @@ import argparse
 import json
 import logging
 import os
-import sys
-
-_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-_src  = os.path.join(_root, 'src')
-for p in (_root, _src):
-    if p not in sys.path:
-        sys.path.insert(0, p)
 
 from confluent_kafka import Consumer, KafkaError, Producer
 from dotenv import load_dotenv
 
+_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 load_dotenv(dotenv_path=os.path.join(_root, '.env'))
 
 logging.basicConfig(
