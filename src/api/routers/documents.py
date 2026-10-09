@@ -78,6 +78,33 @@ async def insert_document(doc_type: str, payload: DocumentPayload, request: Requ
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.get('/{doc_type}')
+async def list_documents(doc_type: str, request: Request, limit: int = 100):
+    """Return a lightweight list of documents for a collection (id, key field, status, updated_at)."""
+    collection_name = COLLECTION_MAP.get(doc_type.lower())
+    if not collection_name:
+        raise HTTPException(status_code=400, detail=f"Unknown doc_type {doc_type!r}")
+
+    key_map = {
+        'rfq': 'rfq_number', 'po': 'po_number', 'asn': 'asn_number',
+        'grn': 'grn_number', 'invoice': 'invoice_number',
+    }
+    key_field = key_map[doc_type.lower()]
+
+    db = request.app.state.mongo_db
+    projection = {key_field: 1, 'status': 1, 'updated_at': 1}
+    cursor = db[collection_name].find({}, projection).sort('updated_at', -1).limit(limit)
+    result = []
+    for d in cursor:
+        result.append({
+            'id':       str(d['_id']),
+            'key':      d.get(key_field, str(d['_id'])),
+            'status':   d.get('status'),
+            'updated_at': d.get('updated_at'),
+        })
+    return result
+
+
 @router.delete('/{doc_type}/{doc_id}')
 async def delete_document(doc_type: str, doc_id: str, request: Request):
     """Delete a document by its natural key — triggers CDC delete event."""
