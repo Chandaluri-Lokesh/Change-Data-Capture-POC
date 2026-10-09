@@ -78,6 +78,69 @@ async def metrics_recent(request: Request, limit: int = 50):
     return [dict(r) for r in rows]
 
 
+@router.get('/benchmarks')
+async def benchmarks(request: Request):
+    """
+    Compute throughput and latency percentiles from recorded CDC events.
+    Returns measured stats + projected times at standard record-count scales.
+    """
+    pool: asyncpg.Pool = request.app.state.pg_pool
+    async with pool.acquire() as conn:
+        stats = await conn.fetchrow("""
+            SELECT
+                COUNT(*)                                                    AS total_events,
+                PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY e2e_lat_ms)   AS p50_e2e_ms,
+                PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY e2e_lat_ms)   AS p95_e2e_ms,
+                PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY e2e_lat_ms)   AS p99_e2e_ms,
+                MIN(e2e_lat_ms)                                             AS min_e2e_ms,
+                MAX(e2e_lat_ms)                                             AS max_e2e_ms,
+                AVG(e2e_lat_ms)::NUMERIC(10,1)                             AS avg_e2e_ms,
+                PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY debezium_lat_ms) AS p50_debezium_ms,
+                PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY consumer_lat_ms) AS p50_consumer_ms,
+                PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY write_lat_ms)    AS p50_write_ms,
+                MIN(recorded_at)                                            AS first_event,
+                MAX(recorded_at)                                            AS last_event
+            FROM cdc_pipeline_metrics
+        """)
+
+        # Throughput: events per second over the full observed window
+        throughput_rps = None
+        if stats['total_events'] and stats['first_event'] and stats['last_event']:
+            span_s = (stats['last_event'] - stats['first_event']).total_seconds()
+            if span_s > 0:
+                throughput_rps = round(stats['total_events'] / span_s, 2)
+
+        # Per-operation breakdown
+        ops = await conn.fetch("""
+            SELECT operation,
+                   COUNT(*) AS count,
+                   AVG(e2e_lat_ms)::NUMERIC(10,1)  AS avg_e2e_ms,
+                   AVG(write_lat_ms)::NUMERIC(10,1) AS avg_write_ms
+            FROM cdc_pipeline_metrics
+            GROUP BY operation
+            ORDER BY count DESC
+        """)
+
+    return {
+        'total_events':      int(stats['total_events'] or 0),
+        'throughput_rps':    throughput_rps,
+        'latency': {
+            'min_ms':  float(stats['min_e2e_ms'] or 0),
+            'avg_ms':  float(stats['avg_e2e_ms'] or 0),
+            'p50_ms':  float(stats['p50_e2e_ms'] or 0),
+            'p95_ms':  float(stats['p95_e2e_ms'] or 0),
+            'p99_ms':  float(stats['p99_e2e_ms'] or 0),
+            'max_ms':  float(stats['max_e2e_ms'] or 0),
+        },
+        'stages': {
+            'debezium_p50_ms': float(stats['p50_debezium_ms'] or 0),
+            'consumer_p50_ms': float(stats['p50_consumer_ms'] or 0),
+            'write_p50_ms':    float(stats['p50_write_ms']    or 0),
+        },
+        'by_operation': [dict(r) for r in ops],
+    }
+
+
 @router.get('/collections')
 async def events_by_collection(request: Request):
     """Event count per collection in the last hour."""
