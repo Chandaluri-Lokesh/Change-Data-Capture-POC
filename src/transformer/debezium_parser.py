@@ -35,6 +35,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+_VALID_OPS = frozenset({'c', 'u', 'd', 'r'})
+
 
 @dataclass
 class ParsedEvent:
@@ -165,7 +167,6 @@ def parse(topic: str, msg_value: Optional[bytes],
         raise ValueError(f"Malformed Debezium envelope: {exc}") from exc
 
     # Normalise unknown op codes to 'unknown' so the router can handle them uniformly
-    _VALID_OPS = {'c', 'u', 'd', 'r'}
     op_raw = envelope.get('op', '')
     if op_raw in _VALID_OPS:
         op = op_raw
