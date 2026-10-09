@@ -2,10 +2,10 @@
   "name": "p2p-connector",
   "config": {
     "connector.class": "io.debezium.connector.mongodb.MongoDbConnector",
-    "mongodb.connection.string": "mongodb://172.20.96.1:27018/?replicaSet=rs0",
+    "mongodb.connection.string": "mongodb://${MONGO_RS_HOST}/?replicaSet=rs0",
     "topic.prefix": "poc",
     "database.include.list": "mydb",
-    "collection.include.list": "mydb.orders,mydb.customers",
+    "collection.include.list": "mydb.rfqs,mydb.purchase_orders,mydb.asns,mydb.grns,mydb.invoices",
     "snapshot.mode": "initial",
     "capture.mode": "change_streams_update_full",
     "key.converter": "org.apache.kafka.connect.json.JsonConverter",

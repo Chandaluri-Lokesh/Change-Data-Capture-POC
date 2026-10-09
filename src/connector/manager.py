@@ -12,6 +12,7 @@ Run
 import json
 import logging
 import os
+import re
 import time
 
 import requests
@@ -28,6 +29,26 @@ CONNECTORS_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'connectors
 # Connectors to register on startup
 CONNECTOR_FILES = ['p2p-connector.json']
 
+_PLACEHOLDER_RE = re.compile(r'\$\{(\w+)\}')
+
+
+def _expand_env(value: str) -> str:
+    """Replace ${VAR} placeholders with values from the environment."""
+    def _sub(m):
+        var = m.group(1)
+        resolved = os.getenv(var)
+        if resolved is None:
+            logger.warning(f"Env var '{var}' referenced in connector config is not set.")
+            return m.group(0)
+        return resolved
+    return _PLACEHOLDER_RE.sub(_sub, value)
+
+
+def _inject_env(config: dict) -> dict:
+    """Recursively expand ${VAR} placeholders in all string values."""
+    return {k: (_inject_env(v) if isinstance(v, dict) else _expand_env(v) if isinstance(v, str) else v)
+            for k, v in config.items()}
+
 
 def register_connector(json_file_name: str, retries: int = 3) -> None:
     path = os.path.join(CONNECTORS_DIR, json_file_name)
@@ -37,6 +58,7 @@ def register_connector(json_file_name: str, retries: int = 3) -> None:
 
     with open(path, 'r') as f:
         config = json.load(f)
+    config['config'] = _inject_env(config['config'])
     name = config['name']
 
     logger.info(f"Targeting connector '{name}'...")
