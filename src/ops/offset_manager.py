@@ -31,9 +31,9 @@ Edge cases
 
 Run
 ───
-  python src/ops/offset_manager.py lag
-  python src/ops/offset_manager.py reset-earliest
-  python src/ops/offset_manager.py reset-latest
+  python -m ops.offset_manager lag
+  python -m ops.offset_manager reset-earliest
+  python -m ops.offset_manager reset-latest
 """
 
 import logging
@@ -60,8 +60,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 BROKER   = os.getenv('KAFKA_BROKER_URL', 'localhost:9092')
-GROUP_ID = 'poc-pipeline-consumer'
-TOPICS   = ['poc.mydb.orders', 'poc.mydb.products']
+GROUP_ID = 'p2p-pipeline-consumer'
+TOPICS   = [
+    'poc.mydb.rfqs',
+    'poc.mydb.purchase_orders',
+    'poc.mydb.asns',
+    'poc.mydb.grns',
+    'poc.mydb.invoices',
+]
 
 _project_root = os.path.abspath(
     os.path.join(os.path.dirname(__file__), '..', '..')
