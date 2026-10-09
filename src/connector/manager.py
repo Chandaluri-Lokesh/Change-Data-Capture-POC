@@ -29,7 +29,7 @@ CONNECTORS_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'connectors
 CONNECTOR_FILES = ['p2p-connector.json']
 
 
-def register_connector(json_file_name: str) -> None:
+def register_connector(json_file_name: str, retries: int = 3) -> None:
     path = os.path.join(CONNECTORS_DIR, json_file_name)
     if not os.path.exists(path):
         logger.error(f"Connector file not found: {path}")
@@ -40,25 +40,34 @@ def register_connector(json_file_name: str) -> None:
     name = config['name']
 
     logger.info(f"Targeting connector '{name}'...")
-    try:
-        resp = requests.get(f'{CONNECT_URL}/connectors/{name}', timeout=10)
-        if resp.status_code == 200:
-            logger.info(f"Connector '{name}' exists — updating config in-place...")
-            r = requests.put(
-                f'{CONNECT_URL}/connectors/{name}/config',
-                json=config['config'], timeout=60,
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.get(f'{CONNECT_URL}/connectors/{name}', timeout=10)
+            if resp.status_code == 200:
+                logger.info(f"Connector '{name}' exists — updating config in-place...")
+                r = requests.put(
+                    f'{CONNECT_URL}/connectors/{name}/config',
+                    json=config['config'], timeout=60,
+                )
+            else:
+                logger.info(f"Connector '{name}' not found — registering new...")
+                r = requests.post(f'{CONNECT_URL}/connectors', json=config, timeout=60)
+            r.raise_for_status()
+            wait_for_running(name)
+            return
+        except requests.exceptions.ConnectionError:
+            logger.error(f"Cannot reach Kafka Connect at {CONNECT_URL}. Is it running?")
+            return
+        except requests.exceptions.Timeout:
+            logger.warning(
+                f"Request timed out registering '{name}' (attempt {attempt}/{retries})."
             )
-            r.raise_for_status()
-        else:
-            logger.info(f"Connector '{name}' not found — registering new...")
-            r = requests.post(f'{CONNECT_URL}/connectors', json=config, timeout=10)
-            r.raise_for_status()
-
-        wait_for_running(name)
-    except requests.exceptions.ConnectionError:
-        logger.error(f"Cannot reach Kafka Connect at {CONNECT_URL}. Is it running?")
-    except requests.exceptions.Timeout:
-        logger.error(f"Request to Kafka Connect timed out while registering '{name}'.")
+            if attempt < retries:
+                time.sleep(5)
+        except requests.exceptions.HTTPError as exc:
+            logger.error(f"HTTP error registering '{name}': {exc}")
+            return
+    logger.error(f"Failed to register '{name}' after {retries} attempts.")
 
 
 def wait_for_running(name: str, retries: int = 15) -> bool:
@@ -77,8 +86,8 @@ def wait_for_running(name: str, retries: int = 15) -> bool:
             logger.info(
                 f"Waiting for '{name}'… connector={conn_state} tasks={tasks}"
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"[wait_for_running] Poll error for '{name}': {exc}")
         time.sleep(3)
     logger.error(f"Connector '{name}' did not reach RUNNING state.")
     return False
@@ -133,7 +142,7 @@ def wait_for_connect_api(retries: int = 30) -> None:
             if requests.get(CONNECT_URL, timeout=5).status_code == 200:
                 logger.info("Kafka Connect REST API is UP.")
                 return
-        except requests.exceptions.ConnectionError:
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             pass
         logger.info(f"Still waiting… ({i+1}/{retries})")
         time.sleep(5)
