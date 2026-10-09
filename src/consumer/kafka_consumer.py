@@ -28,7 +28,13 @@ Run
 import asyncio
 import logging
 import os
+import sys
 import time
+
+# Allow running directly: python src/consumer/kafka_consumer.py
+_src = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if _src not in sys.path:
+    sys.path.insert(0, _src)
 
 from confluent_kafka import Consumer, KafkaError
 from dotenv import load_dotenv
