@@ -102,12 +102,13 @@ app.add_middleware(
 )
 
 # ── Routers ──────────────────────────────────────────────────────────────────
-from api.routers import documents, pipeline, metrics, graph, simulator
+from api.routers import documents, pipeline, metrics, graph, simulator, schema
 
 app.include_router(documents.router,  prefix='/api/documents',  tags=['Documents'])
 app.include_router(pipeline.router,   prefix='/api/pipeline',   tags=['Pipeline'])
 app.include_router(metrics.router,    prefix='/api/metrics',    tags=['Metrics'])
 app.include_router(graph.router,      prefix='/api/graph',      tags=['Graph'])
 app.include_router(simulator.router,  prefix='/api/simulate',   tags=['Simulator'])
+app.include_router(schema.router,     prefix='/api/schema',     tags=['Schema'])
 
 # Frontend is served from the separate cdc-dashboard-ui repo (http://localhost:5173 in dev)
