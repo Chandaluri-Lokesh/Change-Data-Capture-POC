@@ -82,7 +82,7 @@ async def graph_overview(request: Request):
         raise HTTPException(status_code=503, detail='Neo4j not connected')
 
     cypher = """
-        CALL {
+        CALL () {
             MATCH (n) RETURN labels(n)[0] AS label, COUNT(*) AS count
         }
         RETURN label, count

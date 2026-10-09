@@ -54,7 +54,6 @@ def _kafka_lag() -> list:
             'bootstrap.servers':     BROKER,
             'broker.address.family': 'v4',
             'socket.timeout.ms':     3000,
-            'request.timeout.ms':    3000,
         }
         admin = AdminClient(cfg)
         group_id = 'p2p-pipeline-consumer'
