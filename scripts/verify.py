@@ -40,7 +40,7 @@ logging.basicConfig(level=logging.WARNING)
 MONGO_URI       = os.getenv('MONGO_URI', 'mongodb://localhost:27018/?replicaSet=rs0')
 NEO4J_URI       = os.getenv('NEO4J_URI', 'bolt://localhost:7687')
 NEO4J_USER      = os.getenv('NEO4J_USER', 'neo4j')
-NEO4J_PASSWORD  = os.getenv('NEO4J_PASSWORD', 'neo4j')
+NEO4J_PASSWORD  = os.getenv('NEO4J_PASSWORD', 'password')
 MAX_WAIT_S      = 10
 POLL_INTERVAL_S = 0.15
 

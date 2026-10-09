@@ -26,12 +26,6 @@ async def simulate_chain(request: Request):
     """
     db = request.app.state.mongo_db
 
-    # Import the simulator's generator so we share the same logic
-    import sys, os
-    _src = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-    if _src not in sys.path:
-        sys.path.insert(0, _src)
-
     from generator.p2p_simulator import generate_chain, _next_seq
     chain = generate_chain(_next_seq())
 

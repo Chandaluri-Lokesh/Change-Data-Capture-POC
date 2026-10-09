@@ -1,13 +1,8 @@
 """
-GET /api/graph/{collection}/{doc_id}
+GET /api/graph/stats/overview      — node and relationship counts per label
+GET /api/graph/{collection}/{doc_id} — Neo4j subgraph centred on a document node
 
-Returns a Neo4j subgraph centred on the requested node as
-{ nodes: [...], links: [...] } — consumable by react-force-graph-2d.
-
-GET /api/graph/chain/{chain_id}
-
-Returns the full P2P chain graph for a base sequence ID, tracing all
-documents that share the same chain (PO links to RFQ, ASN, GRN, Invoice).
+Returns { nodes: [...], links: [...] } consumable by react-force-graph-2d.
 """
 
 import logging
