@@ -129,7 +129,7 @@ async def metrics_ws(websocket: WebSocket):
                 async with pool.acquire() as conn:
                     new_rows = await conn.fetch("""
                         SELECT id, doc_id, collection, operation, e2e_lat_ms,
-                               debezium_lat_ms, write_lat_ms, recorded_at
+                               debezium_lat_ms, consumer_lat_ms, write_lat_ms, recorded_at
                         FROM cdc_pipeline_metrics
                         WHERE id > $1
                         ORDER BY id ASC
