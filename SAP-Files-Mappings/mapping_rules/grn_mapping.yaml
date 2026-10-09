@@ -68,7 +68,7 @@ neo4j:
       target_node: { label: ASN, key_property: asn_number, source_key_field: asn_number }
       merge_cypher: |
         MATCH (g:GRN {grn_number: $grn_number})
-        MATCH (a:ASN {asn_number: $asn_number})
+        MERGE (a:ASN {asn_number: $asn_number})
         MERGE (g)-[:RECEIVES]->(a)
 
     - type: CONFIRMS
@@ -77,7 +77,7 @@ neo4j:
       target_node: { label: PurchaseOrder, key_property: po_number, source_key_field: po_number }
       merge_cypher: |
         MATCH (g:GRN {grn_number: $grn_number})
-        MATCH (p:PurchaseOrder {po_number: $po_number})
+        MERGE (p:PurchaseOrder {po_number: $po_number})
         MERGE (g)-[:CONFIRMS]->(p)
 
     - type: RECEIVED

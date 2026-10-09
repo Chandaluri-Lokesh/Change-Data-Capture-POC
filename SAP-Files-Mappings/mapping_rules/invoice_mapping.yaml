@@ -74,7 +74,7 @@ neo4j:
       target_node: { label: PurchaseOrder, key_property: po_number, source_key_field: po_number }
       merge_cypher: |
         MATCH (i:Invoice {invoice_number: $invoice_number})
-        MATCH (p:PurchaseOrder {po_number: $po_number})
+        MERGE (p:PurchaseOrder {po_number: $po_number})
         MERGE (i)-[:BILLS]->(p)
 
     - type: REFERENCES
@@ -83,7 +83,7 @@ neo4j:
       target_node: { label: GRN, key_property: grn_number, source_key_field: grn_number }
       merge_cypher: |
         MATCH (i:Invoice {invoice_number: $invoice_number})
-        MATCH (g:GRN {grn_number: $grn_number})
+        MERGE (g:GRN {grn_number: $grn_number})
         MERGE (i)-[:REFERENCES]->(g)
 
     - type: INVOICES

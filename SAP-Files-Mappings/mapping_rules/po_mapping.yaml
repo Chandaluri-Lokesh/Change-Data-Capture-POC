@@ -78,7 +78,7 @@ neo4j:
       target_node: { label: RFQ, key_property: rfq_number, source_key_field: rfq_number }
       merge_cypher: |
         MATCH (p:PurchaseOrder {po_number: $po_number})
-        MATCH (r:RFQ {rfq_number: $rfq_number})
+        MERGE (r:RFQ {rfq_number: $rfq_number})
         MERGE (p)-[:ISSUED_AGAINST]->(r)
 
     - type: ISSUED_TO

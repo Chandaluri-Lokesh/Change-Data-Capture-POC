@@ -69,7 +69,7 @@ neo4j:
       target_node: { label: PurchaseOrder, key_property: po_number, source_key_field: po_number }
       merge_cypher: |
         MATCH (a:ASN {asn_number: $asn_number})
-        MATCH (p:PurchaseOrder {po_number: $po_number})
+        MERGE (p:PurchaseOrder {po_number: $po_number})
         MERGE (a)-[:FULFILLS]->(p)
 
     - type: SHIPS
