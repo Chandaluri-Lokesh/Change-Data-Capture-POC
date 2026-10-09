@@ -20,7 +20,7 @@ import os
 import random
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 from pymongo import MongoClient
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 DIRECT_URI = os.getenv('MONGO_DIRECT_URI', 'mongodb://localhost:27018/?directConnection=true')
 MONGO_URI  = os.getenv('MONGO_URI',        'mongodb://localhost:27018/?replicaSet=rs0')
-RS_HOST    = os.getenv('MONGO_RS_HOST',    '172.20.96.1:27018')
+RS_HOST    = os.getenv('MONGO_RS_HOST',    'localhost:27018')
 DB_NAME    = 'mydb'
 
 PLANTS    = ['Plant-Chennai-01', 'Plant-Mumbai-02', 'Plant-Delhi-03', 'Plant-Pune-04']
@@ -67,7 +67,6 @@ def _today_plus(days: int) -> str:
 
 
 def _now_iso() -> str:
-    from datetime import datetime, timezone
     return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
