@@ -1,4 +1,5 @@
 # Change Data Capture POC — P2P Procure-to-Pay Pipeline
+[Demo Video](https://drive.google.com/file/d/1EckEesf_HUJ2TsV52-O5aVfEUfn87hCS/view?usp=sharing)
 
 End-to-end CDC pipeline using Debezium. Captures real-time changes from MongoDB, streams through Kafka, transforms via Python, and writes to PostgreSQL (analytics) and Neo4j (graph).
 
